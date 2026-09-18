@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import io
 import os
 import sys
 from pathlib import Path
@@ -105,7 +106,7 @@ def _silence_broken_stdout() -> None:
     try:
         stdout_fd = sys.stdout.fileno()
     except (AttributeError, OSError, ValueError):
-        sys.stdout = open(os.devnull, "w", encoding="utf-8")
+        sys.stdout = io.StringIO()
         return
 
     null_fd = os.open(os.devnull, os.O_WRONLY)
