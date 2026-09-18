@@ -60,3 +60,7 @@ The threshold is intentionally fixed at 3 in the initial CLI design. The library
 `below_threshold` events are grouped by rule ID. `no_decoder` and `no_rule` events are grouped by log type and a conservative normalized message pattern. The normalizer currently replaces common timestamp prefixes, UUIDs, long hexadecimal values, and decimal numbers with five or more digits. Short numbers, IP addresses, ports, usernames, paths, event IDs, and HTTP status codes are deliberately retained.
 
 The normalization logic is intentionally conservative and should be validated against real heterogeneous archives before being broadened.
+
+## License
+
+GNU General Public License version 2 only. See [LICENSE](LICENSE).
