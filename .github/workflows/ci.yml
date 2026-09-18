@@ -67,6 +67,7 @@ jobs:
       - run: python -m twine check dist/*
       - run: python -m pip install dist/*.whl
       - run: python -c "from wazuhcoverage import ArchiveAnalysis, Finding, analyze_archive; assert callable(analyze_archive)"
+      - run: python -c "from importlib.resources import files; assert files('wazuhcoverage').joinpath('py.typed').is_file()"
       - run: pipx install dist/*.whl
       - run: wazuhcoverage --help
       - run: python -m wazuhcoverage --help

@@ -61,6 +61,9 @@ Issues = "https://github.com/zbalkan/wazuhcoverage/issues"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+wazuhcoverage = ["py.typed"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q --import-mode=importlib"
