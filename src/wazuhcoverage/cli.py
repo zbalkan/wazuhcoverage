@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import pickle
 import sys
 from pathlib import Path
 
@@ -49,7 +48,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         history = History(HISTORY_FILE)
-    except (OSError, ValueError, EOFError, pickle.UnpicklingError) as exc:
+    except (OSError, ValueError) as exc:
         print(f"wazuhcoverage: cannot read {HISTORY_FILE}: {exc}", file=sys.stderr)
         return 2
 
