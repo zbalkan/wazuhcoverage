@@ -202,3 +202,30 @@ def test_normalization_retains_security_semantic_values(tmp_path: Path) -> None:
     assert any("10.0.0.1" in pattern and "port=22" in pattern and "event=4625" in pattern for pattern in patterns)
     assert any("10.0.0.2" in pattern and "port=22" in pattern and "event=4625" in pattern for pattern in patterns)
     assert all("id=<NUM>" in pattern for pattern in patterns)
+
+def test_event_time_ordering_respects_timezone_offsets(tmp_path: Path) -> None:
+    archive = tmp_path / "archives.json"
+    _write_jsonl(
+        archive,
+        [
+            {
+                "timestamp": "2026-09-18T12:00:00+0300",
+                "full_log": "same event 12345",
+                "decoder": {},
+            },
+            {
+                "timestamp": "2026-09-18T10:30:00+0000",
+                "full_log": "same event 67890",
+                "decoder": {},
+            },
+        ],
+    )
+
+    result = analyze_archive(archive)
+    finding = result.findings[0]
+
+    assert finding.first_seen is not None
+    assert finding.last_seen is not None
+    assert finding.first_seen.startswith("2026-09-18 09:00:00")
+    assert finding.last_seen.startswith("2026-09-18 10:30:00")
+

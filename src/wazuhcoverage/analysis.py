@@ -44,6 +44,7 @@ def analyze_archive(path: str | Path, *, alert_threshold: int = DEFAULT_ALERT_TH
     duckdb = _load_duckdb()
     connection = duckdb.connect(":memory:")
     try:
+        connection.execute("SET TimeZone = 'UTC'")
         _create_events(connection, archive)
         _create_views(connection, alert_threshold)
 
@@ -158,7 +159,7 @@ def _create_events(connection: Any, archive: Path) -> None:
             FROM read_ndjson_objects({archive_sql}, ignore_errors = false)
         )
         SELECT
-            try_cast(fields[1] AS TIMESTAMP) AS event_timestamp,
+            try_cast(fields[1] AS TIMESTAMPTZ) AS event_timestamp,
             fields[2] AS agent_id,
             fields[3] AS agent_name,
             fields[4] AS location,
