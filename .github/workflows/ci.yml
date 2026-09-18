@@ -6,6 +6,7 @@ on:
       - main
       - master
       - "roadmap/**"
+      - "fix/**"
     paths-ignore: &documentation-only
       - "**/*.md"
       - "**/*.avif"
