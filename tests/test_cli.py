@@ -1,4 +1,5 @@
 from pathlib import Path
+
 import pytest
 
 from wazuhcoverage import ArchiveAnalysis, Finding, cli
