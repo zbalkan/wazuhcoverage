@@ -1,8 +1,6 @@
 import json
 from pathlib import Path
 
-import pytest
-
 from wazuhcoverage.history import History
 
 
@@ -22,12 +20,24 @@ def test_history_persists_absolute_path_as_json(tmp_path: Path) -> None:
     assert reloaded.contains(archive)
 
 
-def test_history_rejects_non_json_content_without_deserializing_it(tmp_path: Path) -> None:
+def test_history_overwrites_non_json_content_without_deserializing_it(tmp_path: Path) -> None:
     cache = tmp_path / "history.db"
     cache.write_bytes(b"\x80\x04malicious-looking-pickle")
 
-    with pytest.raises(ValueError, match="Invalid history file"):
-        History(cache)
+    history = History(cache)
+
+    assert json.loads(cache.read_text(encoding="utf-8")) == []
+    assert history._items == set()
+
+
+def test_history_overwrites_invalid_json_structure(tmp_path: Path) -> None:
+    cache = tmp_path / "history.db"
+    cache.write_text('{"unexpected": "object"}\n', encoding="utf-8")
+
+    history = History(cache)
+
+    assert json.loads(cache.read_text(encoding="utf-8")) == []
+    assert history._items == set()
 
 
 def test_history_merges_updates_from_multiple_instances(tmp_path: Path) -> None:

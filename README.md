@@ -140,7 +140,7 @@ Malformed NDJSON is not silently ignored because doing so would corrupt the cove
 
 `wazuhcoverage` owns archive coverage analysis. It does not depend on `wazuhtester` and does not run Wazuh logtest internally. A higher-level toolkit can compose the libraries directly, for example by analyzing an archive with `wazuhcoverage` and replaying selected samples with `wazuhtester`.
 
-`history.db` remains only a processed-path cache. It is not intended to become an analytics database. Older pickle-formatted history files are deliberately rejected rather than deserialized; delete the old cache once when upgrading.
+`history.db` remains only a processed-path cache. It is not intended to become an analytics database. Malformed, legacy-pickle, or structurally invalid history files are never deserialized. Because history is only a disposable processed-path cache, the tool replaces such files atomically with an empty JSON history and continues.
 
 ## License
 

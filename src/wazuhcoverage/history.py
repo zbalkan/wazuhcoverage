@@ -30,11 +30,13 @@ class History:
 
         try:
             value = json.loads(self.path.read_text(encoding="utf-8"))
-        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-            raise ValueError(f"Invalid history file: {self.path}") from exc
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            self._save_unlocked(set())
+            return set()
 
         if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
-            raise ValueError(f"Invalid history file: {self.path}")
+            self._save_unlocked(set())
+            return set()
         return set(value)
 
     @staticmethod
