@@ -29,7 +29,7 @@ def render_report(analysis: ArchiveAnalysis) -> str:
     for index, finding in enumerate(analysis.findings, start=1):
         lines.extend(
             [
-                f"[{index}] {finding.observed_status} | {finding.log_type}",
+                f"[{index}] {finding.observed_status} | {finding.log_type or '-'}",
                 f"    Events: {finding.event_count:,}",
                 f"    Affected agents: {finding.affected_agents:,}",
                 f"    First seen: {finding.first_seen or '-'}",
