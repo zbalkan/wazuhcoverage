@@ -30,7 +30,7 @@ class LogTypeCount:
 class Finding:
     finding_key: str
     observed_status: str
-    log_type: str
+    log_type: str | None
     message_pattern: str
     event_count: int
     affected_agents: int

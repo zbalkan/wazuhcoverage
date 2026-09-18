@@ -250,6 +250,10 @@ def _create_views(connection: Any, alert_threshold: int) -> None:
                 WHEN observed_status = 'below_threshold' THEN NULL
                 ELSE log_type
             END AS finding_log_type,
+            CASE
+                WHEN observed_status = 'below_threshold' THEN NULL
+                ELSE decoder_name
+            END AS finding_decoder,
             md5(
                 CASE
                     WHEN observed_status = 'below_threshold'
@@ -276,7 +280,7 @@ def _create_views(connection: Any, alert_threshold: int) -> None:
             count(DISTINCT agent_id) FILTER (WHERE agent_id IS NOT NULL) AS affected_agents,
             min(event_timestamp) AS first_seen,
             max(event_timestamp) AS last_seen,
-            any_value(decoder_name) AS observed_decoder,
+            any_value(finding_decoder) AS observed_decoder,
             any_value(rule_id) AS observed_rule_id,
             any_value(rule_level) AS observed_rule_level,
             min(full_log) AS sample_log

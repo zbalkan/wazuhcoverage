@@ -132,6 +132,7 @@ def test_below_threshold_rule_does_not_claim_one_log_type(tmp_path: Path) -> Non
     assert finding.observed_status == "below_threshold"
     assert finding.observed_rule_id == "200"
     assert finding.log_type is None
+    assert finding.observed_decoder is None
     assert finding.event_count == 2
 
 
