@@ -24,21 +24,24 @@ def _load_duckdb() -> Any:
     return duckdb
 
 
-def analyze_archive(path: Path, *, alert_threshold: int = DEFAULT_ALERT_THRESHOLD) -> ArchiveAnalysis:
+def analyze_archive(path: str | Path, *, alert_threshold: int = DEFAULT_ALERT_THRESHOLD) -> ArchiveAnalysis:
     """Analyze one Wazuh NDJSON archive.
 
     The compressed/uncompressed source is scanned once into a temporary table.
     All subsequent classification, grouping and sampling runs against that table.
     """
 
-    duckdb = _load_duckdb()
-    archive = path.expanduser().resolve()
+    archive = Path(path).expanduser().resolve()
     if not archive.is_file():
         raise FileNotFoundError(archive)
 
     if alert_threshold < 0:
         raise ValueError("alert_threshold must be non-negative")
 
+    if archive.stat().st_size == 0:
+        return _empty_analysis(archive)
+
+    duckdb = _load_duckdb()
     connection = duckdb.connect(":memory:")
     try:
         _create_events(connection, archive)
@@ -69,7 +72,7 @@ def analyze_archive(path: Path, *, alert_threshold: int = DEFAULT_ALERT_THRESHOL
             Finding(
                 finding_key=str(row[0]),
                 observed_status=str(row[1]),
-                log_type=str(row[2]),
+                log_type=_string_or_none(row[2]),
                 message_pattern=str(row[3]),
                 event_count=int(row[4]),
                 affected_agents=int(row[5]),
@@ -96,7 +99,7 @@ def analyze_archive(path: Path, *, alert_threshold: int = DEFAULT_ALERT_THRESHOL
                     observed_rule_level,
                     sample_log
                 FROM findings
-                ORDER BY event_count DESC, observed_status, log_type, finding_key
+                ORDER BY event_count DESC, observed_status, coalesce(log_type, ''), finding_key
                 """
             ).fetchall()
         )
@@ -114,6 +117,16 @@ def analyze_archive(path: Path, *, alert_threshold: int = DEFAULT_ALERT_THRESHOL
 
 def _string_or_none(value: Any) -> str | None:
     return None if value is None else str(value)
+
+
+def _empty_analysis(archive: Path) -> ArchiveAnalysis:
+    return ArchiveAnalysis(
+        path=archive,
+        total_events=0,
+        status_counts=tuple(StatusCount(status, 0) for status in STATUSES),
+        log_type_counts=(),
+        findings=(),
+    )
 
 
 def _create_events(connection: Any, archive: Path) -> None:
@@ -170,7 +183,7 @@ def _create_views(connection: Any, alert_threshold: int) -> None:
             CASE
                 WHEN nullif(decoder_name, '') IS NULL THEN 'no_decoder'
                 WHEN nullif(rule_id, '') IS NULL THEN 'no_rule'
-                WHEN rule_level < {int(alert_threshold)} THEN 'below_threshold'
+                WHEN rule_level IS NULL OR rule_level < {int(alert_threshold)} THEN 'below_threshold'
                 ELSE 'at_or_above_threshold'
             END AS observed_status,
             CASE
@@ -233,6 +246,10 @@ def _create_views(connection: Any, alert_threshold: int) -> None:
                 WHEN observed_status = 'below_threshold' THEN concat('rule:', coalesce(rule_id, 'unknown'))
                 ELSE normalized_log
             END AS message_pattern,
+            CASE
+                WHEN observed_status = 'below_threshold' THEN NULL
+                ELSE log_type
+            END AS finding_log_type,
             md5(
                 CASE
                     WHEN observed_status = 'below_threshold'
@@ -253,7 +270,7 @@ def _create_views(connection: Any, alert_threshold: int) -> None:
         SELECT
             finding_key,
             any_value(observed_status) AS observed_status,
-            any_value(log_type) AS log_type,
+            any_value(finding_log_type) AS log_type,
             any_value(message_pattern) AS message_pattern,
             count(*) AS event_count,
             count(DISTINCT agent_id) FILTER (WHERE agent_id IS NOT NULL) AS affected_agents,

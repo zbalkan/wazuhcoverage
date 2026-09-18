@@ -23,7 +23,7 @@ class StatusCount:
 @dataclass(frozen=True)
 class LogTypeCount:
     status: str
-    log_type: str
+    log_type: str | None
     event_count: int
 
 
