@@ -1,10 +1,7 @@
 from pathlib import Path
-from types import SimpleNamespace
-
 import pytest
 
-from wazuhcoverage import ArchiveAnalysis, Finding
-from wazuhcoverage import cli
+from wazuhcoverage import ArchiveAnalysis, Finding, cli
 
 
 def test_cli_flags_and_targets() -> None:

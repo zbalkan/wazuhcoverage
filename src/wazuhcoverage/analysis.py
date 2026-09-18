@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from wazuhcoverage.models import ArchiveAnalysis, Finding, LogTypeCount, STATUSES, StatusCount
+from wazuhcoverage.models import STATUSES, ArchiveAnalysis, Finding, LogTypeCount, StatusCount
 
 DEFAULT_ALERT_THRESHOLD = 3
 

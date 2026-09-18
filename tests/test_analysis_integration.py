@@ -2,6 +2,7 @@ import gzip
 import json
 from pathlib import Path
 
+import duckdb
 import pytest
 
 from wazuhcoverage import analyze_archive
@@ -165,7 +166,7 @@ def test_malformed_json_is_not_silently_ignored(tmp_path: Path) -> None:
     archive = tmp_path / "archives.json"
     archive.write_text('{"full_log": "valid"}\n{not-json}\n', encoding="utf-8")
 
-    with pytest.raises(Exception):
+    with pytest.raises(duckdb.Error):
         analyze_archive(archive)
 
 

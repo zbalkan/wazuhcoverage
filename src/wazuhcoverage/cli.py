@@ -85,7 +85,7 @@ def main(argv: list[str] | None = None) -> int:
             # A closed downstream pipe means output did not complete, so do not
             # mark the current archive as processed.
             return 1
-        except Exception as exc:  # one bad archive should not block the rest
+        except Exception as exc:  # noqa: BLE001 - one bad archive should not block the rest
             failed += 1
             print(f"wazuhcoverage: failed {archive}: {exc}", file=sys.stderr)
 
