@@ -1,0 +1,101 @@
+"""Command-line interface for wazuhcoverage."""
+
+from __future__ import annotations
+
+import argparse
+import pickle
+import sys
+from pathlib import Path
+
+from wazuhcoverage.analysis import DEFAULT_ALERT_THRESHOLD, analyze_archive
+from wazuhcoverage.history import History
+from wazuhcoverage.report import render_report
+from wazuhcoverage.targets import resolve_targets
+
+HISTORY_FILE = Path("history.db")
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="wazuhcoverage",
+        description="Analyze Wazuh JSON archives and emit coverage statistics or representative samples.",
+    )
+    parser.add_argument(
+        "--ignore-history",
+        action="store_true",
+        help="Process matching archives even when they are already present in history.db.",
+    )
+    parser.add_argument(
+        "--no-stats",
+        action="store_true",
+        help="Write only one representative sample per finding to stdout; suitable for piping to logtest.",
+    )
+    parser.add_argument(
+        "targets",
+        nargs="+",
+        metavar="TARGET",
+        help="Archive file path or glob pattern. Recursive ** patterns are supported.",
+    )
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    targets = resolve_targets(args.targets)
+
+    if not targets:
+        print("wazuhcoverage: no files matched the supplied targets", file=sys.stderr)
+        return 2
+
+    try:
+        history = History(HISTORY_FILE)
+    except (OSError, ValueError, EOFError, pickle.UnpicklingError) as exc:
+        print(f"wazuhcoverage: cannot read {HISTORY_FILE}: {exc}", file=sys.stderr)
+        return 2
+
+    processed = 0
+    skipped = 0
+    failed = 0
+
+    for archive in targets:
+        if not args.ignore_history and history.contains(archive):
+            skipped += 1
+            continue
+
+        print(f"Processing {archive}", file=sys.stderr)
+
+        try:
+            analysis = analyze_archive(archive, alert_threshold=DEFAULT_ALERT_THRESHOLD)
+
+            if args.no_stats:
+                for finding in analysis.findings:
+                    sys.stdout.write(f"{finding.sample_log}\n")
+            else:
+                sys.stdout.write(render_report(analysis))
+
+            # A successful flush is part of successful processing. This matters
+            # when stdout is a pipe and the downstream consumer exits early.
+            sys.stdout.flush()
+
+            # History is updated only after analysis and output completed.
+            history.add(archive)
+            processed += 1
+
+        except BrokenPipeError:
+            # A closed downstream pipe means output did not complete, so do not
+            # mark the current archive as processed.
+            return 1
+        except Exception as exc:  # one bad archive should not block the rest
+            failed += 1
+            print(f"wazuhcoverage: failed {archive}: {exc}", file=sys.stderr)
+
+    print(
+        f"Matched: {len(targets)} | Processed: {processed} | Skipped: {skipped} | Failed: {failed}",
+        file=sys.stderr,
+    )
+    return 1 if failed else 0
+
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
