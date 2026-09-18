@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 import pytest
@@ -147,3 +148,4 @@ def test_broken_pipe_does_not_update_history(monkeypatch: pytest.MonkeyPatch, tm
 
     assert cli.main(["--no-stats", str(archive)]) == 1
     assert added == []
+    assert getattr(cli.sys.stdout, "name", None) == os.devnull

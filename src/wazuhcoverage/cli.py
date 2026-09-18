@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
@@ -82,7 +83,10 @@ def main(argv: list[str] | None = None) -> int:
 
         except BrokenPipeError:
             # A closed downstream pipe means output did not complete, so do not
-            # mark the current archive as processed.
+            # mark the current archive as processed. Redirect the underlying
+            # descriptor before interpreter shutdown to avoid a second flush
+            # changing the process exit status to 120.
+            _silence_broken_stdout()
             return 1
         except Exception as exc:  # noqa: BLE001 - one bad archive should not block the rest
             failed += 1
@@ -94,6 +98,21 @@ def main(argv: list[str] | None = None) -> int:
     )
     return 1 if failed else 0
 
+
+def _silence_broken_stdout() -> None:
+    """Redirect stdout to the null device after a downstream pipe closes."""
+
+    try:
+        stdout_fd = sys.stdout.fileno()
+    except (AttributeError, OSError, ValueError):
+        sys.stdout = open(os.devnull, "w", encoding="utf-8")
+        return
+
+    null_fd = os.open(os.devnull, os.O_WRONLY)
+    try:
+        os.dup2(null_fd, stdout_fd)
+    finally:
+        os.close(null_fd)
 
 
 if __name__ == "__main__":
