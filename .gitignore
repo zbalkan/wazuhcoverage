@@ -140,6 +140,7 @@ pyvenv.cfg
 /out
 launch.json
 *.db
+.history.db.lock
 .vscode
 .tmp*
 data/

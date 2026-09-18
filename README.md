@@ -2,7 +2,7 @@
 
 `wazuhcoverage` is a Python library and small batch CLI for measuring coverage in Wazuh JSON archives. It reads each archive once with DuckDB, classifies every event, groups unresolved or low-level events into findings, and selects one deterministic representative `full_log` sample per finding.
 
-The CLI keeps only one piece of persistent state: `history.db`, an internal pickled `set[str]` of successfully processed absolute archive paths. The library API has no dependency on that history mechanism.
+The CLI keeps only one piece of persistent state: `history.db`, an internal JSON array representing the set of successfully processed absolute archive paths. Updates are serialized with a small sidecar lock and written atomically. The library API has no dependency on that history mechanism.
 
 ## Installation
 
@@ -140,7 +140,7 @@ Malformed NDJSON is not silently ignored because doing so would corrupt the cove
 
 `wazuhcoverage` owns archive coverage analysis. It does not depend on `wazuhtester` and does not run Wazuh logtest internally. A higher-level toolkit can compose the libraries directly, for example by analyzing an archive with `wazuhcoverage` and replaying selected samples with `wazuhtester`.
 
-`history.db` remains only a processed-path cache. It is not intended to become an analytics database.
+`history.db` remains only a processed-path cache. It is not intended to become an analytics database. Older pickle-formatted history files are deliberately rejected rather than deserialized; delete the old cache once when upgrading.
 
 ## License
 
