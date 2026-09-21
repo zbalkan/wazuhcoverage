@@ -14,16 +14,21 @@ def test_cli_flags_and_targets() -> None:
 
     assert args.ignore_history is True
     assert args.no_stats is True
-    assert args.template_mining is False
+    assert args.strict is False
     assert args.targets == ["/archives/**/*.json.gz", "/other/a.json.gz"]
 
 
-def test_template_mining_flag_defaults_off_and_parses() -> None:
-    assert cli.build_parser().parse_args(["a.json"]).template_mining is False
-    assert cli.build_parser().parse_args(["--template-mining", "a.json"]).template_mining is True
+def test_cli_exposes_no_engine_switch() -> None:
+    # Template mining is the grouping engine, not a mode, so there is nothing
+    # to select. A stale --template-mining in a cron entry must fail loudly
+    # rather than be accepted as a no-op.
+    parser = cli.build_parser()
+    assert not hasattr(parser.parse_args(["a.json"]), "template_mining")
+    with pytest.raises(SystemExit):
+        parser.parse_args(["--template-mining", "a.json"])
 
 
-def test_cli_forwards_template_mining_to_the_analysis(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys) -> None:
+def test_cli_forwards_parsing_mode_to_the_analysis(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys) -> None:
     archive = tmp_path / "archive.json.gz"
     archive.touch()
     received: list[dict] = []
@@ -37,8 +42,8 @@ def test_cli_forwards_template_mining_to_the_analysis(monkeypatch: pytest.Monkey
     )
     monkeypatch.setattr(cli, "render_report", lambda _analysis: "report\n")
 
-    assert cli.main(["--template-mining", str(archive)]) == 0
-    assert received == [{"alert_threshold": 3, "skip_malformed": True, "template_mining": True}]
+    assert cli.main(["--strict", str(archive)]) == 0
+    assert received == [{"alert_threshold": 3, "skip_malformed": False}]
     capsys.readouterr()
 
 

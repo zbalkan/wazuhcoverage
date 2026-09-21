@@ -38,15 +38,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="Fail an archive on the first unparseable line instead of skipping and counting it.",
     )
     parser.add_argument(
-        "--template-mining",
-        action="store_true",
-        help=(
-            "Group unresolved events by a mined Drain template instead of the regex-normalized message. "
-            "Requires the drain3 extra and changes finding keys, so results are not comparable with a "
-            "run that omits this flag."
-        ),
-    )
-    parser.add_argument(
         "targets",
         nargs="+",
         metavar="TARGET",
@@ -85,7 +76,6 @@ def main(argv: Optional[list[str]] = None) -> int:
                 archive,
                 alert_threshold=DEFAULT_ALERT_THRESHOLD,
                 skip_malformed=not args.strict,
-                template_mining=args.template_mining,
             )
 
             # Surface the loss on stderr too: with --no-stats the report that

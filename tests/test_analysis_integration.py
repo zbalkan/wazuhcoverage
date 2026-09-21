@@ -244,7 +244,7 @@ def test_representative_sample_is_deterministic(tmp_path: Path) -> None:
     assert first.findings[0].sample_log == second.findings[0].sample_log == "event 12345"
 
 
-def test_normalization_retains_security_semantic_values(tmp_path: Path) -> None:
+def test_masking_runs_before_mining_and_constant_values_survive_both(tmp_path: Path) -> None:
     archive = tmp_path / "archives.json"
     _write_jsonl(
         archive,
@@ -255,11 +255,18 @@ def test_normalization_retains_security_semantic_values(tmp_path: Path) -> None:
     )
 
     result = analyze_archive(archive)
-    assert len(result.findings) == 2
-    patterns = {finding.message_pattern for finding in result.findings}
-    assert any("10.0.0.1" in pattern and "port=22" in pattern and "event=4625" in pattern for pattern in patterns)
-    assert any("10.0.0.2" in pattern and "port=22" in pattern and "event=4625" in pattern for pattern in patterns)
-    assert all("id=<NUM>" in pattern for pattern in patterns)
+
+    # The regex normalizer is the masking pass in front of the miner: the long
+    # identifier is masked before Drain ever sees it, which is why the two lines
+    # differ in one token and merge. Tokens that are constant across the family
+    # survive both stages, so a port and an event ID stay readable in the
+    # pattern and only the varying token becomes a wildcard.
+    assert len(result.findings) == 1
+    pattern = result.findings[0].message_pattern
+    assert "id=<NUM>" in pattern
+    assert "port=22" in pattern and "event=4625" in pattern
+    assert "10.0.0.1" not in pattern and "10.0.0.2" not in pattern
+    assert "<*>" in pattern
 
 
 def test_event_time_ordering_respects_timezone_offsets(tmp_path: Path) -> None:

@@ -38,18 +38,17 @@ dependencies = [
   # never silently acquire a DuckDB the package has not been tested against.
   "duckdb>=1.3,<2; python_version >= '3.10'",
   "duckdb>=1.3,<1.5; python_version < '3.10'",
+  # Drain template mining is the grouping engine, not an option, so drain3 is
+  # a runtime dependency. It is pure Python and sets no interpreter floor, but
+  # it does pin its own dependencies exactly (jsonpickle and cachetools), which
+  # the dependency-conflict CI job exists to catch when that pin starts to
+  # collide with something else in a resolved environment.
+  "drain3>=0.9.11,<1",
 ]
 
 [project.optional-dependencies]
-# Template mining is optional on purpose: DuckDB stays the only dependency a
-# default install pulls in. drain3 is pure Python and imposes no floor of its
-# own, so it does not disturb the 3.9 compatibility floor.
-drain3 = [
-  "drain3>=0.9.11,<1",
-]
 test = [
   "pytest>=8,<10",
-  "drain3>=0.9.11,<1",
 ]
 build = [
   "build>=1.2",
@@ -57,7 +56,6 @@ build = [
 ]
 dev = [
   "pytest>=8,<10",
-  "drain3>=0.9.11,<1",
   "ruff>=0.8",
   "build>=1.2",
   "twine>=5",

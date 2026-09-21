@@ -70,8 +70,3 @@ class ArchiveAnalysis:
     status_counts: tuple[StatusCount, ...]
     log_type_counts: tuple[LogTypeCount, ...]
     findings: tuple[Finding, ...]
-    # How Finding.message_pattern and Finding.finding_key were derived. Regex
-    # normalization and Drain template mining produce different keys for the
-    # same events, so findings from the two modes must not be compared or
-    # diffed; recording the mode is what makes that mistake detectable.
-    template_mining: bool = False

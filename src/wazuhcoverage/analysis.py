@@ -27,26 +27,56 @@ def _load_duckdb() -> Any:
     return duckdb
 
 
-def _load_template_miner() -> Any:
-    """Build a drain3 template miner.
+# Drain tuning. The library defaults (sim_th = 0.4, depth = 4) merge log
+# families a coverage report must keep apart: on a labelled corpus of sixteen
+# families they placed Windows 4624 and 4625 -- a successful and a failed logon
+# -- in one template, and did the same for firewall ACCEPT and DROP. Raising
+# the similarity threshold removes those merges, and raising it too far shatters
+# families whose variable tokens are paths or hostnames. Measured across three
+# corpus seeds, thresholds up to 0.53 always produced cross-family merges and
+# 0.58 exploded the template count from 25 to 93; 0.56 and 0.57 were the only
+# values with neither defect on every seed, so the midpoint of that plateau is
+# taken with margin on both sides. Re-run tools/tune_drain.py after changing
+# the normalizer, the corpus or the drain3 version.
+_DRAIN_SIM_TH = 0.56
+# Depth of the prefix tree, in tokens plus two sentinel levels. Left at the
+# library default: at the chosen threshold a depth of 3 produced identical
+# results with one fewer discriminating token, and 5 only fragmented further.
+_DRAIN_DEPTH = 4
+# Bound on the number of live clusters, evicted least-recently-used. A cluster
+# costs roughly 1.1 KB, measured on an archive of 60,000 messages that share no
+# structure at all, so this caps the miner near 55 MB on input that defeats
+# grouping entirely. The bound sits far above the vocabulary of a real archive,
+# where mining that same volume stays under two seconds, so eviction is a
+# safety valve rather than part of normal operation. Templates are keyed by
+# text, so a cluster recreated after an eviction still lands in its original
+# finding.
+_DRAIN_MAX_CLUSTERS = 50_000
 
-    drain3 is an optional extra rather than a runtime dependency, so the import
-    error is translated into an actionable message instead of a traceback.
-    """
+
+def _build_template_miner() -> Any:
+    """Build the Drain template miner used to group unresolved events."""
 
     try:
         from drain3 import TemplateMiner
         from drain3.template_miner_config import TemplateMinerConfig
-    except ImportError as exc:
-        raise RuntimeError(
-            "Template mining requires drain3. Install it with: pip install 'wazuhcoverage[drain3]'"
-        ) from exc
+    except ImportError as exc:  # pragma: no cover - installation error path
+        raise RuntimeError("drain3 is required. Install wazuhcoverage with its dependencies.") from exc
 
     # The config is constructed explicitly because drain3 otherwise loads a
     # drain3.ini from the current working directory, which would make an
     # archive's findings depend on where the command happened to run.
     config = TemplateMinerConfig()
     config.profiling_enabled = False
+    config.drain_sim_th = _DRAIN_SIM_TH
+    config.drain_depth = _DRAIN_DEPTH
+    config.drain_max_clusters = _DRAIN_MAX_CLUSTERS
+    # Numeric tokens stay parametrized, as drain3 ships them. Turning this off
+    # to protect event IDs and ports was measured and rejected: it multiplied
+    # the template count roughly tenfold without removing a single cross-family
+    # merge, because the tokens that distinguish those families carry digits
+    # inside a larger token and are wildcarded either way.
+    config.parametrize_numeric_tokens = True
     # No masking instructions are registered: the SQL normalizer already applies
     # the conservative masks this project documents, and a second masking pass
     # would silently widen them beyond what the README promises.
@@ -61,24 +91,22 @@ def analyze_archive(
     *,
     alert_threshold: int = DEFAULT_ALERT_THRESHOLD,
     skip_malformed: bool = True,
-    template_mining: bool = False,
 ) -> ArchiveAnalysis:
     """Analyze one Wazuh NDJSON archive.
 
     The compressed/uncompressed source is scanned once into a temporary table.
     All subsequent classification, grouping and sampling runs against that table.
 
+    Unresolved events are grouped by a Drain template mined from the archive,
+    which collapses the variants regex masks cannot reach -- usernames,
+    hostnames, paths and other categorical tokens. Mining is the only grouping
+    engine; the regex normalizer runs ahead of it as a masking pass.
+
     A line DuckDB cannot parse as a JSON object is skipped rather than failing
     the whole archive, and the number of such lines is reported as
     ``ArchiveAnalysis.malformed_lines``. Skipped lines are excluded from
     ``total_events``, so the coverage denominator stays exact and auditable.
     Pass ``skip_malformed=False`` to reject the archive on the first bad line.
-
-    ``template_mining=True`` replaces the regex-normalized message with a Drain
-    template mined from the archive, which collapses variants the regex masks
-    cannot reach -- usernames, hostnames, paths and other categorical tokens.
-    It requires the ``drain3`` extra and changes ``Finding.finding_key``, so
-    findings produced with and without it are not comparable.
     """
 
     archive = Path(path).expanduser().resolve()
@@ -88,12 +116,8 @@ def analyze_archive(
     if alert_threshold < 0:
         raise ValueError("alert_threshold must be non-negative")
 
-    # Built before any work so a missing extra fails immediately rather than
-    # after a full archive scan.
-    miner = _load_template_miner() if template_mining else None
-
     if archive.stat().st_size == 0:
-        return _empty_analysis(archive, template_mining=template_mining)
+        return _empty_analysis(archive)
 
     duckdb = _load_duckdb()
     connection = duckdb.connect(":memory:")
@@ -101,8 +125,8 @@ def analyze_archive(
         connection.execute("SET TimeZone = 'UTC'")
         _create_events(connection, archive, skip_malformed=skip_malformed)
         _create_views(connection, alert_threshold)
-        use_templates = _create_template_map(connection, miner)
-        _create_finding_views(connection, use_templates=use_templates)
+        _create_template_map(connection, _build_template_miner())
+        _create_finding_views(connection)
 
         malformed_lines = int(connection.execute("SELECT count(*) FROM events WHERE is_malformed").fetchone()[0])
         total_events = int(connection.execute("SELECT count(*) FROM classified_events").fetchone()[0])
@@ -192,7 +216,6 @@ def analyze_archive(
             status_counts=status_counts,
             log_type_counts=log_type_counts,
             findings=findings,
-            template_mining=template_mining,
         )
     finally:
         connection.close()
@@ -212,7 +235,7 @@ def _percentage(part: int, whole: int) -> float:
     return 0.0 if whole == 0 else 100.0 * part / whole
 
 
-def _empty_analysis(archive: Path, *, template_mining: bool = False) -> ArchiveAnalysis:
+def _empty_analysis(archive: Path) -> ArchiveAnalysis:
     return ArchiveAnalysis(
         path=archive,
         total_events=0,
@@ -220,7 +243,6 @@ def _empty_analysis(archive: Path, *, template_mining: bool = False) -> ArchiveA
         status_counts=tuple(StatusCount(status=status, event_count=0, percentage=0.0) for status in STATUSES),
         log_type_counts=(),
         findings=(),
-        template_mining=template_mining,
     )
 
 
@@ -346,7 +368,7 @@ def _create_views(connection: Any, alert_threshold: int) -> None:
     )
 
 
-def _create_template_map(connection: Any, miner: Optional[Any]) -> bool:
+def _create_template_map(connection: Any, miner: Any) -> None:
     """Mine one Drain template per distinct normalized message.
 
     Only the statuses that group by message text are mined. ``below_threshold``
@@ -362,11 +384,9 @@ def _create_template_map(connection: Any, miner: Optional[Any]) -> bool:
     arrival order. Template IDs are derived from the sorted template text
     instead, so the same archive always produces the same grouping.
 
-    Returns ``False`` when mining was not requested or found nothing to group.
+    The mapping tables are always created, empty included, so the finding views
+    join against a fixed shape whatever the archive contains.
     """
-
-    if miner is None:
-        return False
 
     connection.execute(
         """
@@ -385,30 +405,30 @@ def _create_template_map(connection: Any, miner: Optional[Any]) -> bool:
     )
 
     rows = connection.execute("SELECT log_id, normalized_log FROM distinct_logs ORDER BY log_id").fetchall()
-    if not rows:
-        return False
 
     # The template a message receives when it is inserted can still widen as
     # later messages join the same cluster, so the cluster is recorded during
     # the pass and the final template is read back only once every message has
     # been seen. Mapping on the insertion-time template would split a cluster.
-    assignments = []
-    for row in rows:
-        assignments.append((int(row[0]), miner.add_log_message(str(row[1]))["cluster_id"]))
+    assignments = [(int(row[0]), miner.add_log_message(str(row[1]))["cluster_id"]) for row in rows]
 
     mined = {cluster.cluster_id: cluster.get_template() for cluster in miner.drain.clusters}
+    # Two clusters can carry the same template text once eviction recreates one,
+    # so text is the key and such clusters land in a single finding.
     template_ids = {
         template: index for index, template in enumerate(sorted({mined[cluster] for _, cluster in assignments}))
     }
 
-    _load_log_templates(connection, [(log_id, template_ids[mined[cluster]]) for log_id, cluster in assignments])
-
+    connection.execute("CREATE TEMP TABLE log_templates (log_id BIGINT, template_id INTEGER)")
     connection.execute("CREATE TEMP TABLE templates (template_id INTEGER, log_template VARCHAR)")
+    if not assignments:
+        return
+
+    _load_log_templates(connection, [(log_id, template_ids[mined[cluster]]) for log_id, cluster in assignments])
     connection.executemany(
         "INSERT INTO templates VALUES (?, ?)",
         [(template_id, template) for template, template_id in template_ids.items()],
     )
-    return True
 
 
 def _load_log_templates(connection: Any, assignments: list[tuple[int, int]]) -> None:
@@ -430,7 +450,7 @@ def _load_log_templates(connection: Any, assignments: list[tuple[int, int]]) -> 
         with open(path, "w", newline="", encoding="utf-8") as stream:
             csv.writer(stream).writerows(assignments)
         connection.execute(
-            "CREATE TEMP TABLE log_templates AS SELECT * FROM "
+            "INSERT INTO log_templates SELECT * FROM "
             "read_csv(?, header = false, columns = {'log_id': 'BIGINT', 'template_id': 'INTEGER'})",
             [path],
         )
@@ -438,18 +458,16 @@ def _load_log_templates(connection: Any, assignments: list[tuple[int, int]]) -> 
         os.unlink(path)
 
 
-def _create_finding_views(connection: Any, *, use_templates: bool) -> None:
+def _create_finding_views(connection: Any) -> None:
     # coalesce() keeps the regex-normalized message as the fallback so a row
     # that somehow missed the join still groups rather than collapsing to NULL.
-    pattern = "coalesce(t.log_template, n.normalized_log)" if use_templates else "n.normalized_log"
-    source = (
-        """normalized_events n
+    # below_threshold rows always take that path: they are not mined, because a
+    # rule ID is already their grouping.
+    pattern = "coalesce(t.log_template, n.normalized_log)"
+    source = """normalized_events n
         LEFT JOIN distinct_logs d ON d.normalized_log = n.normalized_log
         LEFT JOIN log_templates lt ON lt.log_id = d.log_id
         LEFT JOIN templates t ON t.template_id = lt.template_id"""
-        if use_templates
-        else "normalized_events n"
-    )
 
     connection.execute(
         f"""
