@@ -43,14 +43,21 @@ _DRAIN_SIM_TH = 0.56
 # library default: at the chosen threshold a depth of 3 produced identical
 # results with one fewer discriminating token, and 5 only fragmented further.
 _DRAIN_DEPTH = 4
-# Bound on the number of live clusters, evicted least-recently-used. A cluster
-# costs roughly 1.1 KB, measured on an archive of 60,000 messages that share no
-# structure at all, so this caps the miner near 55 MB on input that defeats
-# grouping entirely. The bound sits far above the vocabulary of a real archive,
-# where mining that same volume stays under two seconds, so eviction is a
-# safety valve rather than part of normal operation. Templates are keyed by
-# text, so a cluster recreated after an eviction still lands in its original
-# finding.
+# Bound on the number of live clusters, evicted least-recently-used. It bounds
+# both memory and time on input that defeats grouping, and time is the reason
+# it exists. Measured on messages that share no structure at all, where every
+# message becomes its own cluster: 60,000 of them took 103 seconds, 120,000
+# took 1,373 seconds and peaked at 127 MB, so the cost grows far faster than
+# the input. Capping the live clusters bounds it -- the same 120,000 messages
+# took 449 seconds and 25 MB under a 20,000 cluster cap. A cluster costs about
+# 1.1 KB, so this bound holds the miner near 55 MB.
+#
+# It sits far above the vocabulary of a real archive, where messages group and
+# mining that volume stays under two seconds, so eviction is a safety valve
+# rather than part of normal operation, and an archive that reaches the cap has
+# more distinct shapes than a coverage report could be read from. Templates are
+# keyed by text, so a cluster recreated after an eviction still lands in its
+# original finding.
 _DRAIN_MAX_CLUSTERS = 50_000
 
 

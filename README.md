@@ -207,10 +207,12 @@ The Drain parameters are set in `wazuhcoverage.analysis` and differ from the dra
 | --- | --- | --- | --- |
 | `sim_th` | 0.56 | 0.4 | The default merges log families a coverage report must separate. |
 | `depth` | 4 | 4 | Unchanged; 3 measured identically and 5 only fragmented further. |
-| `max_clusters` | 50,000 | unbounded | Caps miner memory near 55 MB on input that defeats grouping. |
+| `max_clusters` | 50,000 | unbounded | Bounds mining time and memory on input that defeats grouping. |
 | `parametrize_numeric_tokens` | `true` | `true` | Unchanged; disabling it multiplied templates without preventing a merge. |
 
 The similarity threshold is the consequential one, and both directions fail loudly. At the drain3 default of 0.4, the corpus merges Windows `4624` with `4625` — a successful logon reported together with a failed one — and firewall `ACCEPT` with `DROP`. Above 0.57 the count jumps from 25 templates to 93 as families whose variable tokens are paths or hostnames shatter into one finding per value. Across three corpus seeds, 0.56 and 0.57 were the only values with neither defect, so 0.56 is taken with margin on both sides. Two tests in `tests/test_template_mining.py` guard that band: one fails if opposite outcomes of a family merge, the other if a high-cardinality family fragments.
+
+Mining cost tracks an archive's vocabulary, not its event count, and it degrades sharply only when messages share no structure at all, because every message then becomes its own cluster. Measured on such input, 60,000 distinct shapes took 103 seconds and 120,000 took 1,373 seconds, which is why the cluster count is capped: the same 120,000 shapes took 449 seconds under a tighter cap of 20,000. A real archive does not approach this, since its messages group; an archive that reaches the cap carries more distinct shapes than a coverage report could be read from.
 
 The trade-off that remains is real. Drain merges by positional shape, so messages that share a shape but differ in meaning can still land in one finding, and `message_pattern` reports `<*>` where a username or path was. The tuning reduces that risk on the families measured; it does not eliminate it for shapes the corpus does not cover. `sample_log` is unaffected and stays source-derived, so every finding still carries a real line to replay. Mined state is per archive and never written to disk, so `history.db` remains the only persistent state, and templates are re-derived per archive rather than accumulated across them.
 
