@@ -23,9 +23,7 @@ def test_template_mining_flag_defaults_off_and_parses() -> None:
     assert cli.build_parser().parse_args(["--template-mining", "a.json"]).template_mining is True
 
 
-def test_cli_forwards_template_mining_to_the_analysis(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys
-) -> None:
+def test_cli_forwards_template_mining_to_the_analysis(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys) -> None:
     archive = tmp_path / "archive.json.gz"
     archive.touch()
     received: list[dict] = []
@@ -180,9 +178,7 @@ def test_broken_pipe_does_not_update_history(monkeypatch: pytest.MonkeyPatch, tm
     assert isinstance(cli.sys.stdout, io.StringIO)
 
 
-def test_no_stats_emits_exactly_one_row_per_finding(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys
-) -> None:
+def test_no_stats_emits_exactly_one_row_per_finding(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys) -> None:
     archive = tmp_path / "archive.json.gz"
     archive.touch()
 

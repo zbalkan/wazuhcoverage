@@ -97,10 +97,7 @@ def _summarize_log_types(
         status_counts = by_log_type.setdefault(item.log_type, {})
         status_counts[item.status] = status_counts.get(item.status, 0) + item.event_count
 
-    rows = [
-        (log_type, sum(status_counts.values()), status_counts)
-        for log_type, status_counts in by_log_type.items()
-    ]
+    rows = [(log_type, sum(status_counts.values()), status_counts) for log_type, status_counts in by_log_type.items()]
     rows.sort(key=lambda item: (-item[1], item[0] or ""))
     return rows
 

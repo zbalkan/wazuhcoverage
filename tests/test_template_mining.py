@@ -145,9 +145,7 @@ def test_missing_drain3_raises_an_actionable_error(tmp_path: Path, monkeypatch: 
         analyze_archive(archive, template_mining=True)
 
 
-def test_missing_drain3_fails_before_the_archive_is_scanned(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_missing_drain3_fails_before_the_archive_is_scanned(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     archive = tmp_path / "archives.json"
     archive.write_text("{not-json}\n", encoding="utf-8")
     monkeypatch.setitem(sys.modules, "drain3", None)

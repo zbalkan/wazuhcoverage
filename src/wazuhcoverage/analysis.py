@@ -217,9 +217,7 @@ def _empty_analysis(archive: Path, *, template_mining: bool = False) -> ArchiveA
         path=archive,
         total_events=0,
         malformed_lines=0,
-        status_counts=tuple(
-            StatusCount(status=status, event_count=0, percentage=0.0) for status in STATUSES
-        ),
+        status_counts=tuple(StatusCount(status=status, event_count=0, percentage=0.0) for status in STATUSES),
         log_type_counts=(),
         findings=(),
         template_mining=template_mining,

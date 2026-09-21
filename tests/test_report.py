@@ -60,9 +60,7 @@ def _analysis() -> ArchiveAnalysis:
 def _rendered_log_type_rows(analysis: ArchiveAnalysis) -> list[str]:
     lines = render_report(analysis).splitlines()
     header = next(
-        index
-        for index, line in enumerate(lines)
-        if line.startswith("Log type") and "at_or_above_threshold" in line
+        index for index, line in enumerate(lines) if line.startswith("Log type") and "at_or_above_threshold" in line
     )
     end = lines.index("", header + 1)
     return lines[header + 1 : end]
@@ -74,9 +72,7 @@ def test_report_renders_status_and_log_type_tables() -> None:
     assert "Status                          Events   % total" in lines
     assert lines[lines.index("Status") + 3].split() == ["no_decoder", "3", "30.00%"]
 
-    header = next(
-        line for line in lines if line.startswith("Log type") and "at_or_above_threshold" in line
-    )
+    header = next(line for line in lines if line.startswith("Log type") and "at_or_above_threshold" in line)
     assert header.split() == [
         "Log",
         "type",

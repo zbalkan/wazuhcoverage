@@ -10,6 +10,8 @@ Python 3.9 or newer on Linux, macOS, or Windows. DuckDB is the only runtime depe
 
 Optional Drain template mining additionally requires [drain3](https://github.com/IBM/Drain3), installed with the `drain3` extra. It is pure Python, imposes no interpreter floor of its own, and is never imported unless template mining is requested.
 
+The extra is not free of constraints. drain3 0.9.11 is the latest release, it is published as a source distribution only, and it pins `jsonpickle==1.5.1` and `cachetools==4.2.1` exactly. Installing the extra into a shared environment can therefore conflict with a project that already uses either library, which is a further reason to install the CLI with `pipx` and to add the extra to a library environment only when template mining is actually needed.
+
 Python 3.9 is supported as a compatibility floor for hosts that still ship it, and it constrains the DuckDB version. DuckDB dropped 3.9 in 1.5.0, so the dependency is capped at `duckdb<1.5` on 3.9 via an explicit environment marker; such installs stay on the 1.4.x line, which no longer receives upstream fixes. Python 3.10 or newer is recommended wherever the host allows it.
 
 Because 3.9 cannot evaluate PEP 604 `X | None` annotations at runtime, the public models are annotated with `typing.Optional` and `typing.Union`. This keeps `typing.get_type_hints()` working on every supported interpreter, so consumers that introspect annotations at runtime behave identically across the range.
@@ -71,6 +73,8 @@ The same PyPI distribution provides both the library and the console entry point
 python -m pip install -e ".[dev]"
 python -m pytest
 ```
+
+The `dev` and `test` extras include `drain3`, because the template-mining tests exercise the real miner rather than a stub.
 
 ## CLI usage
 
@@ -157,9 +161,14 @@ from wazuhcoverage import (
 
 ## Statistics
 
-The report carries two complementary tables. The first is status-based and ranks status buckets by event count. The second is log-type-based: it pivots the detailed `(status, log type)` cells into one row per log type, ranks log types by aggregate event count, and shows the four status counts side by side.
+A report opens with a header that records the archive path, the event total, how many malformed lines were skipped, and which pattern source produced the findings. Two complementary tables follow. The first is status-based and ranks status buckets by event count. The second is log-type-based: it pivots the detailed `(status, log type)` cells into one row per log type, ranks log types by aggregate event count, and shows the four status counts side by side.
 
 ```text
+Archive: /archives/2026/09/archive.json.gz
+Total events: 8
+Malformed lines skipped: 0
+Pattern source: regex normalization
+
 Status
 ------
 Status                          Events   % total
@@ -170,10 +179,10 @@ below_threshold                      1    12.50%
 
 Log types
 ---------
-Log type                         Events   % total  no_decoder     no_rule  below_threshold  at_or_above_threshold
-sshd                                  4    50.00%           0           1                1                      2
-/var/log/app.log                      3    37.50%           3           0                0                      0
-windows                               1    12.50%           0           1                0                      0
+Log type                                Events   % total  no_decoder     no_rule  below_threshold  at_or_above_threshold
+sshd                                         4    50.00%           0           1                1                      2
+/var/log/app.log                             3    37.50%           3           0                0                      0
+windows                                      1    12.50%           0           1                0                      0
 ```
 
 `% total` is the share of `total_events`, which excludes malformed lines. The four status columns in the log-type table are event counts, and together they equal `Events` for that row. This lets the report answer both which log types dominate the archive and how each log type is classified without repeating a status-first breakdown.

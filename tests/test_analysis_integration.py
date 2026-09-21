@@ -261,6 +261,7 @@ def test_normalization_retains_security_semantic_values(tmp_path: Path) -> None:
     assert any("10.0.0.2" in pattern and "port=22" in pattern and "event=4625" in pattern for pattern in patterns)
     assert all("id=<NUM>" in pattern for pattern in patterns)
 
+
 def test_event_time_ordering_respects_timezone_offsets(tmp_path: Path) -> None:
     archive = tmp_path / "archives.json"
     _write_jsonl(
@@ -286,7 +287,6 @@ def test_event_time_ordering_respects_timezone_offsets(tmp_path: Path) -> None:
     assert finding.last_seen is not None
     assert finding.first_seen.startswith("2026-09-18 09:00:00")
     assert finding.last_seen.startswith("2026-09-18 10:30:00")
-
 
 
 def test_status_counts_carry_total_percentage_and_are_ordered_descending(tmp_path: Path) -> None:
@@ -430,9 +430,7 @@ def test_collapsing_a_sample_preserves_its_content(tmp_path: Path) -> None:
     # Each run of line breaks becomes one separator; nothing else about the log
     # is rewritten, because logtest must see what the decoder would see. The
     # tabs are part of the log and are preserved.
-    assert sample == (
-        "Exception in thread main \tat com.acme.Foo.bar(Foo.java:42) \tat com.acme.Baz.run(Baz.java:7)"
-    )
+    assert sample == ("Exception in thread main \tat com.acme.Foo.bar(Foo.java:42) \tat com.acme.Baz.run(Baz.java:7)")
 
 
 def test_single_line_samples_are_untouched(tmp_path: Path) -> None:
