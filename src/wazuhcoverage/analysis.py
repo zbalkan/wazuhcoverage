@@ -62,21 +62,44 @@ def analyze_archive(
         malformed_lines = int(connection.execute("SELECT count(*) FROM events WHERE is_malformed").fetchone()[0])
         total_events = int(connection.execute("SELECT count(*) FROM classified_events").fetchone()[0])
 
-        raw_statuses = dict(
-            connection.execute(
+        raw_statuses = {
+            str(status): int(count)
+            for status, count in connection.execute(
                 "SELECT observed_status, count(*) FROM classified_events GROUP BY observed_status"
             ).fetchall()
+        }
+
+        # Every status is reported even when it holds no event: a zero bucket is
+        # a coverage statement, not missing data. Ties keep the STATUSES order so
+        # two runs over the same archive render identically.
+        status_counts = tuple(
+            sorted(
+                (
+                    StatusCount(
+                        status=status,
+                        event_count=raw_statuses.get(status, 0),
+                        percentage=_percentage(raw_statuses.get(status, 0), total_events),
+                    )
+                    for status in STATUSES
+                ),
+                key=lambda item: (-item.event_count, STATUSES.index(item.status)),
+            )
         )
-        status_counts = tuple(StatusCount(status, int(raw_statuses.get(status, 0))) for status in STATUSES)
 
         log_type_counts = tuple(
-            LogTypeCount(str(status), str(log_type), int(count))
+            LogTypeCount(
+                status=str(status),
+                log_type=_string_or_none(log_type),
+                event_count=int(count),
+                percentage=_percentage(int(count), total_events),
+                status_percentage=_percentage(int(count), raw_statuses.get(str(status), 0)),
+            )
             for status, log_type, count in connection.execute(
                 """
                 SELECT observed_status, log_type, count(*) AS event_count
                 FROM classified_events
                 GROUP BY observed_status, log_type
-                ORDER BY observed_status, event_count DESC, log_type
+                ORDER BY event_count DESC, observed_status, log_type
                 """
             ).fetchall()
         )
@@ -133,12 +156,24 @@ def _string_or_none(value: Any) -> Optional[str]:
     return None if value is None else str(value)
 
 
+def _percentage(part: int, whole: int) -> float:
+    """Return ``part`` as a percentage of ``whole``, or 0.0 when ``whole`` is 0.
+
+    An empty denominator is a real case here -- an empty archive, or a status
+    bucket no event fell into -- and 0.0 is the only honest answer for it.
+    """
+
+    return 0.0 if whole == 0 else 100.0 * part / whole
+
+
 def _empty_analysis(archive: Path) -> ArchiveAnalysis:
     return ArchiveAnalysis(
         path=archive,
         total_events=0,
         malformed_lines=0,
-        status_counts=tuple(StatusCount(status, 0) for status in STATUSES),
+        status_counts=tuple(
+            StatusCount(status=status, event_count=0, percentage=0.0) for status in STATUSES
+        ),
         log_type_counts=(),
         findings=(),
     )
@@ -296,8 +331,10 @@ def _create_views(connection: Any, alert_threshold: int) -> None:
         """
     )
 
+    # Raw string: the sample normalization below passes regex escapes to
+    # DuckDB, they are not Python escapes.
     connection.execute(
-        """
+        r"""
         CREATE TEMP VIEW findings AS
         SELECT
             finding_key,
@@ -311,7 +348,13 @@ def _create_views(connection: Any, alert_threshold: int) -> None:
             any_value(finding_decoder) AS observed_decoder,
             any_value(rule_id) AS observed_rule_id,
             any_value(rule_level) AS observed_rule_level,
-            min(full_log) AS sample_log
+            -- The representative is still the deterministic min() of the raw
+            -- logs; only its line breaks are collapsed. A sample exists to be
+            -- replayed through wazuh-logtest, which reads one log per line, so
+            -- a multi-line log emitted verbatim would be replayed as several
+            -- unrelated logs -- the first tested against the wrong decoder and
+            -- the rest as fragments no rule was ever written for.
+            trim(regexp_replace(min(full_log), '[\r\n]+', ' ', 'g')) AS sample_log
         FROM finding_events
         GROUP BY finding_key
         """

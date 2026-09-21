@@ -287,3 +287,158 @@ def test_event_time_ordering_respects_timezone_offsets(tmp_path: Path) -> None:
     assert finding.first_seen.startswith("2026-09-18 09:00:00")
     assert finding.last_seen.startswith("2026-09-18 10:30:00")
 
+
+
+def test_status_counts_carry_total_percentage_and_are_ordered_descending(tmp_path: Path) -> None:
+    archive = tmp_path / "archives.json"
+    _write_jsonl(archive, _fixture_rows())
+
+    result = analyze_archive(archive)
+    counts = [item.event_count for item in result.status_counts]
+    percentages = {item.status: item.percentage for item in result.status_counts}
+
+    assert counts == sorted(counts, reverse=True)
+    assert result.status_counts[0].status == "no_decoder"
+    assert percentages["no_decoder"] == pytest.approx(40.0)
+    assert percentages["no_rule"] == pytest.approx(20.0)
+    # Malformed lines are outside the denominator, so the buckets account for
+    # the whole archive and nothing else.
+    assert sum(percentages.values()) == pytest.approx(100.0)
+
+
+def test_status_count_ties_keep_a_stable_declared_order(tmp_path: Path) -> None:
+    archive = tmp_path / "archives.json"
+    _write_jsonl(
+        archive,
+        [
+            {"full_log": "a", "decoder": {}},
+            {"full_log": "b", "decoder": {"name": "sshd"}},
+        ],
+    )
+
+    result = analyze_archive(archive)
+
+    assert [item.status for item in result.status_counts] == [
+        "no_decoder",
+        "no_rule",
+        "below_threshold",
+        "at_or_above_threshold",
+    ]
+    assert [item.event_count for item in result.status_counts] == [1, 1, 0, 0]
+
+
+def test_log_type_counts_are_ordered_by_count_across_statuses(tmp_path: Path) -> None:
+    archive = tmp_path / "archives.json"
+    _write_jsonl(
+        archive,
+        [
+            {"full_log": "one", "decoder": {"name": "sshd"}},
+            {"full_log": "two", "decoder": {"name": "sshd"}},
+            {"full_log": "three", "decoder": {"name": "sshd"}},
+            {"full_log": "four", "decoder": {"name": "windows"}},
+            {"location": "/var/log/app.log", "full_log": "five", "decoder": {}},
+        ],
+    )
+
+    result = analyze_archive(archive)
+    counts = [item.event_count for item in result.log_type_counts]
+
+    # A global count ordering, not one grouped by status first: the largest
+    # populations must surface regardless of which bucket they fell into.
+    assert counts == sorted(counts, reverse=True)
+    assert (result.log_type_counts[0].status, result.log_type_counts[0].log_type) == ("no_rule", "sshd")
+
+
+def test_log_type_percentages_measure_archive_and_status_shares(tmp_path: Path) -> None:
+    archive = tmp_path / "archives.json"
+    _write_jsonl(
+        archive,
+        [
+            {"full_log": "one", "decoder": {"name": "sshd"}},
+            {"full_log": "two", "decoder": {"name": "sshd"}},
+            {"full_log": "three", "decoder": {"name": "sshd"}},
+            {"full_log": "four", "decoder": {"name": "windows"}},
+            {"location": "/var/log/app.log", "full_log": "five", "decoder": {}},
+        ],
+    )
+
+    result = analyze_archive(archive)
+    rows = {(item.status, item.log_type): item for item in result.log_type_counts}
+
+    sshd = rows[("no_rule", "sshd")]
+    assert sshd.percentage == pytest.approx(60.0)
+    assert sshd.status_percentage == pytest.approx(75.0)
+
+    app = rows[("no_decoder", "/var/log/app.log")]
+    assert app.percentage == pytest.approx(20.0)
+    # The only source in a small bucket still owns all of it. That contrast is
+    # the reason both percentages are reported rather than one.
+    assert app.status_percentage == pytest.approx(100.0)
+
+    assert sum(item.percentage for item in result.log_type_counts) == pytest.approx(100.0)
+    for status in ("no_decoder", "no_rule"):
+        shares = [item.status_percentage for item in result.log_type_counts if item.status == status]
+        assert sum(shares) == pytest.approx(100.0)
+
+
+def test_empty_archive_reports_zero_percentages(tmp_path: Path) -> None:
+    archive = tmp_path / "archives.json"
+    archive.touch()
+
+    result = analyze_archive(archive)
+
+    assert all(item.percentage == 0.0 for item in result.status_counts)
+
+
+def _multiline_rows() -> list[dict]:
+    return [
+        {
+            "location": "/var/log/app.log",
+            "decoder": {},
+            "full_log": "Exception in thread main\n\tat com.acme.Foo.bar(Foo.java:42)\r\n\tat com.acme.Baz.run(Baz.java:7)",
+        },
+        {
+            "location": "/var/log/app.log",
+            "decoder": {},
+            "full_log": "Exception in thread main\n\tat com.acme.Foo.bar(Foo.java:99)\r\n\tat com.acme.Baz.run(Baz.java:7)",
+        },
+    ]
+
+
+def test_sample_log_is_always_one_row(tmp_path: Path) -> None:
+    archive = tmp_path / "archives.json"
+    _write_jsonl(archive, _multiline_rows())
+
+    result = analyze_archive(archive)
+
+    # logtest reads one log per line. A multi-line sample emitted verbatim
+    # would be replayed as several unrelated logs, so the first line would be
+    # tested against the wrong decoder and the rest as fragments no rule was
+    # ever written for.
+    assert result.findings
+    for finding in result.findings:
+        assert "\n" not in finding.sample_log
+        assert "\r" not in finding.sample_log
+
+
+def test_collapsing_a_sample_preserves_its_content(tmp_path: Path) -> None:
+    archive = tmp_path / "archives.json"
+    _write_jsonl(archive, _multiline_rows()[:1])
+
+    sample = analyze_archive(archive).findings[0].sample_log
+
+    # Each run of line breaks becomes one separator; nothing else about the log
+    # is rewritten, because logtest must see what the decoder would see. The
+    # tabs are part of the log and are preserved.
+    assert sample == (
+        "Exception in thread main \tat com.acme.Foo.bar(Foo.java:42) \tat com.acme.Baz.run(Baz.java:7)"
+    )
+
+
+def test_single_line_samples_are_untouched(tmp_path: Path) -> None:
+    archive = tmp_path / "archives.json"
+    _write_jsonl(archive, _fixture_rows())
+
+    for finding in analyze_archive(archive).findings:
+        assert finding.sample_log == finding.sample_log.strip()
+        assert "\n" not in finding.sample_log

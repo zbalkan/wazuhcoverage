@@ -23,6 +23,10 @@ STATUSES = (
 class StatusCount:
     status: str
     event_count: int
+    # Share of ArchiveAnalysis.total_events, in percent. Malformed lines are
+    # excluded from that denominator, so these percentages sum to 100.0 (up to
+    # float representation) across all statuses of a non-empty archive.
+    percentage: float
 
 
 @dataclass(frozen=True)
@@ -30,6 +34,13 @@ class LogTypeCount:
     status: str
     log_type: Optional[str]
     event_count: int
+    # Share of ArchiveAnalysis.total_events, in percent.
+    percentage: float
+    # Share of the events in this row's status bucket, in percent. The two
+    # answer different questions: percentage sizes a log type against the whole
+    # archive, status_percentage ranks it inside its own bucket, where a small
+    # bucket can still be dominated by one source.
+    status_percentage: float
 
 
 @dataclass(frozen=True)

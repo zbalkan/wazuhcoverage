@@ -1,4 +1,5 @@
 import io
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -150,3 +151,51 @@ def test_broken_pipe_does_not_update_history(monkeypatch: pytest.MonkeyPatch, tm
     assert cli.main(["--no-stats", str(archive)]) == 1
     assert added == []
     assert isinstance(cli.sys.stdout, io.StringIO)
+
+
+def test_no_stats_emits_exactly_one_row_per_finding(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys
+) -> None:
+    archive = tmp_path / "archive.json.gz"
+    archive.touch()
+
+    class FakeHistory:
+        def __init__(self, _path: Path) -> None:
+            pass
+
+        def contains(self, _path: Path) -> bool:
+            return False
+
+        def add(self, path: Path) -> None:
+            pass
+
+    analysis = _analysis(archive)
+    findings = analysis.findings + (
+        Finding(
+            finding_key="second",
+            observed_status="no_decoder",
+            log_type="/var/log/app.log",
+            message_pattern="pattern",
+            event_count=1,
+            affected_agents=1,
+            first_seen=None,
+            last_seen=None,
+            observed_decoder=None,
+            observed_rule_id=None,
+            observed_rule_level=None,
+            sample_log="another raw sample",
+        ),
+    )
+    analysis = replace(analysis, findings=findings)
+
+    monkeypatch.setattr(cli, "History", FakeHistory)
+    monkeypatch.setattr(cli, "resolve_targets", lambda _targets: [archive])
+    monkeypatch.setattr(cli, "analyze_archive", lambda path, alert_threshold, skip_malformed: analysis)
+
+    assert cli.main(["--no-stats", str(archive)]) == 0
+    captured = capsys.readouterr()
+
+    # The stdout contract for the logtest pipe: one log per line, so the row
+    # count and the finding count must agree exactly.
+    assert captured.out.splitlines() == ["raw sample", "another raw sample"]
+    assert len(captured.out.splitlines()) == len(analysis.findings)

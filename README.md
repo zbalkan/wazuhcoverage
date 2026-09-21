@@ -1,6 +1,6 @@
 # wazuhcoverage
 
-`wazuhcoverage` is a Python library and small batch CLI for measuring coverage in Wazuh JSON archives. It reads each archive once with DuckDB, classifies every event, groups unresolved or low-level events into findings, and selects one deterministic representative `full_log` sample per finding.
+`wazuhcoverage` is a Python library and small batch CLI for measuring coverage in Wazuh JSON archives. It reads each archive once with DuckDB, classifies every event, groups unresolved or low-level events into findings, and selects one deterministic representative `full_log` sample per finding, emitted as a single row.
 
 The CLI keeps only one piece of persistent state: `history.db`, an internal JSON array representing the set of successfully processed absolute archive paths. Updates are serialized with a small sidecar lock and written atomically. The library API has no dependency on that history mechanism.
 
@@ -106,11 +106,13 @@ Skipping is the default because a single truncated line — the usual result of 
 wazuhcoverage --no-stats "/archives/**/*.json.gz"
 ```
 
-`stdout` contains only one representative raw `full_log` per finding. Progress, errors, and the run summary go to `stderr`, so output remains safe to pipe into another program:
+`stdout` contains exactly one row per finding, each row a representative `full_log`. Progress, errors, and the run summary go to `stderr`, so output remains safe to pipe into another program:
 
 ```bash
 wazuhcoverage --no-stats "/archives/**/*.json.gz" | wazuh-logtest
 ```
+
+One log per row is a contract, not a formatting preference. `wazuh-logtest` reads one log per line, so a multi-line sample — a stack trace, a wrapped EventChannel record, anything collected with `multi-line` or `multi-line-regex` — would be replayed as several unrelated logs: the first tested against the wrong decoder and the remainder as fragments no rule was ever written for. Runs of `CR`/`LF` inside the selected sample are therefore collapsed to a single space, and leading and trailing whitespace is trimmed. Nothing else is rewritten; tabs, spacing, and every other character reach logtest as the decoder would see them. `Finding.sample_log` carries the same single-row value, so an API consumer that replays samples gets the identical guarantee.
 
 History is updated only after analysis completes and stdout flushes successfully. A broken downstream pipe therefore does not mark the current archive as processed.
 
@@ -130,6 +132,35 @@ from wazuhcoverage import (
 ```
 
 `analyze_archive()` accepts either `str` or `pathlib.Path` and returns an `ArchiveAnalysis`. Pass `skip_malformed=False` for the fail-fast behaviour that `--strict` selects. CLI concerns such as glob expansion, `history.db`, report rendering, stdout/stderr, and exit codes are intentionally outside the analysis API.
+
+## Statistics
+
+The report carries two tables. Both are ordered by event count, descending, so the largest populations appear first regardless of which bucket they fall into.
+
+```text
+Status
+------
+Status                          Events   % total
+no_decoder                           3    37.50%
+no_rule                              2    25.00%
+at_or_above_threshold                2    25.00%
+below_threshold                      1    12.50%
+
+Log types
+---------
+Status                  Log type                                Events   % total  % status
+no_decoder              /var/log/app.log                             3    37.50%   100.00%
+at_or_above_threshold   sshd                                         2    25.00%   100.00%
+below_threshold         sshd                                         1    12.50%   100.00%
+no_rule                 sshd                                         1    12.50%    50.00%
+no_rule                 windows                                      1    12.50%    50.00%
+```
+
+`% total` is the share of `total_events`, which excludes malformed lines; the status percentages therefore sum to 100. `% status` is the share of the row's own status bucket, which is a different question: a log type that is a rounding error against the whole archive can still account for every event in an uncovered bucket, and only the second column shows that. Both are exposed on the models as `StatusCount.percentage`, `LogTypeCount.percentage`, and `LogTypeCount.status_percentage`, so a consumer does not have to recompute a denominator the analysis already established.
+
+Every status is listed even when its count is zero, because an empty bucket is a coverage statement rather than missing data. Equal counts keep the declared bucket order (`no_decoder`, `no_rule`, `below_threshold`, `at_or_above_threshold`), which makes two runs over the same archive render identically.
+
+The log-type table is grouped by status and log type but sorted globally by count, not grouped by status first. A single status therefore appears on several non-adjacent rows. That is deliberate: the ranking question an operator asks of this table is which sources produce the most unresolved volume, not how one bucket is composed, and `% status` answers the second question without reordering the first.
 
 ## Classification
 
