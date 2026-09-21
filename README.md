@@ -157,7 +157,7 @@ from wazuhcoverage import (
 
 ## Statistics
 
-The report carries two tables. Both are ordered by event count, descending, so the largest populations appear first regardless of which bucket they fall into.
+The report carries two complementary tables. The first is status-based and ranks status buckets by event count. The second is log-type-based: it pivots the detailed `(status, log type)` cells into one row per log type, ranks log types by aggregate event count, and shows the four status counts side by side.
 
 ```text
 Status
@@ -170,19 +170,17 @@ below_threshold                      1    12.50%
 
 Log types
 ---------
-Status                  Log type                                Events   % total  % status
-no_decoder              /var/log/app.log                             3    37.50%   100.00%
-at_or_above_threshold   sshd                                         2    25.00%   100.00%
-below_threshold         sshd                                         1    12.50%   100.00%
-no_rule                 sshd                                         1    12.50%    50.00%
-no_rule                 windows                                      1    12.50%    50.00%
+Log type                         Events   % total  no_decoder     no_rule  below_threshold  at_or_above_threshold
+sshd                                  4    50.00%           0           1                1                      2
+/var/log/app.log                      3    37.50%           3           0                0                      0
+windows                               1    12.50%           0           1                0                      0
 ```
 
-`% total` is the share of `total_events`, which excludes malformed lines; the status percentages therefore sum to 100. `% status` is the share of the row's own status bucket, which is a different question: a log type that is a rounding error against the whole archive can still account for every event in an uncovered bucket, and only the second column shows that. Both are exposed on the models as `StatusCount.percentage`, `LogTypeCount.percentage`, and `LogTypeCount.status_percentage`, so a consumer does not have to recompute a denominator the analysis already established.
+`% total` is the share of `total_events`, which excludes malformed lines. The four status columns in the log-type table are event counts, and together they equal `Events` for that row. This lets the report answer both which log types dominate the archive and how each log type is classified without repeating a status-first breakdown.
 
-Every status is listed even when its count is zero, because an empty bucket is a coverage statement rather than missing data. Equal counts keep the declared bucket order (`no_decoder`, `no_rule`, `below_threshold`, `at_or_above_threshold`), which makes two runs over the same archive render identically.
+`ArchiveAnalysis.log_type_counts` remains the detailed API representation with one record per `(status, log type)` pair. `LogTypeCount.percentage` is the pair's share of the whole archive and `LogTypeCount.status_percentage` is its share of that status bucket. The CLI pivots those records only while rendering, so the analysis model and public API do not change.
 
-The log-type table is grouped by status and log type but sorted globally by count, not grouped by status first. A single status therefore appears on several non-adjacent rows. That is deliberate: the ranking question an operator asks of this table is which sources produce the most unresolved volume, not how one bucket is composed, and `% status` answers the second question without reordering the first.
+Every status is listed even when its count is zero, because an empty bucket is a coverage statement rather than missing data. Equal status counts keep the declared bucket order (`no_decoder`, `no_rule`, `below_threshold`, `at_or_above_threshold`). Log types are ordered by aggregate event count descending, with the log-type label breaking ties deterministically.
 
 ## Classification
 

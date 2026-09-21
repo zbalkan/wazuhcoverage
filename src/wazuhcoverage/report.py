@@ -4,20 +4,21 @@ from __future__ import annotations
 
 from typing import Optional
 
-from wazuhcoverage.models import ArchiveAnalysis
+from wazuhcoverage.models import STATUSES, ArchiveAnalysis
 
 _STATUS_WIDTH = 24
 _LOG_TYPE_WIDTH = 32
 _COUNT_WIDTH = 14
 _PERCENT_WIDTH = 10
+_STATUS_COUNT_WIDTHS = {status: max(12, len(status) + 2) for status in STATUSES}
 
 
 def render_report(analysis: ArchiveAnalysis) -> str:
     """Render a compact human-readable report for one archive.
 
-    Both tables are ordered by event count, descending. Percentages are shares
-    of ``total_events``, which excludes malformed lines; ``% status`` is instead
-    the share of the row's own status bucket.
+    The first table ranks status buckets by event count. The second pivots the
+    status/log-type cells into one row per log type and ranks those rows by
+    aggregate event count.
     """
 
     lines: list[str] = [
@@ -28,17 +29,15 @@ def render_report(analysis: ArchiveAnalysis) -> str:
         "",
         "Status",
         "------",
-        _row("Status", None, "Events", "% total", None),
+        _status_row("Status", "Events", "% total"),
     ]
 
     for status in analysis.status_counts:
         lines.append(
-            _row(
+            _status_row(
                 status.status,
-                None,
                 f"{status.event_count:,}",
                 _percent(status.percentage),
-                None,
             )
         )
 
@@ -47,18 +46,22 @@ def render_report(analysis: ArchiveAnalysis) -> str:
             "",
             "Log types",
             "---------",
-            _row("Status", "Log type", "Events", "% total", "% status"),
+            _log_type_row(
+                "Log type",
+                "Events",
+                "% total",
+                {status: status for status in STATUSES},
+            ),
         ]
     )
 
-    for log_type in analysis.log_type_counts:
+    for log_type, event_count, status_counts in _summarize_log_types(analysis):
         lines.append(
-            _row(
-                log_type.status,
-                log_type.log_type or "-",
-                f"{log_type.event_count:,}",
-                _percent(log_type.percentage),
-                _percent(log_type.status_percentage),
+            _log_type_row(
+                log_type or "-",
+                f"{event_count:,}",
+                _percent(_percentage(event_count, analysis.total_events)),
+                {status: f"{status_counts.get(status, 0):,}" for status in STATUSES},
             )
         )
 
@@ -84,32 +87,60 @@ def render_report(analysis: ArchiveAnalysis) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
-def _row(
-    status: str,
-    log_type: Optional[str],
+def _summarize_log_types(
+    analysis: ArchiveAnalysis,
+) -> list[tuple[Optional[str], int, dict[str, int]]]:
+    """Pivot detailed status/log-type counts into one row per log type."""
+
+    by_log_type: dict[Optional[str], dict[str, int]] = {}
+    for item in analysis.log_type_counts:
+        status_counts = by_log_type.setdefault(item.log_type, {})
+        status_counts[item.status] = status_counts.get(item.status, 0) + item.event_count
+
+    rows = [
+        (log_type, sum(status_counts.values()), status_counts)
+        for log_type, status_counts in by_log_type.items()
+    ]
+    rows.sort(key=lambda item: (-item[1], item[0] or ""))
+    return rows
+
+
+def _status_row(status: str, count: str, percentage: str) -> str:
+    cells = [
+        f"{status:<{_STATUS_WIDTH}}",
+        f"{count:>{_COUNT_WIDTH}}",
+        f"{percentage:>{_PERCENT_WIDTH}}",
+    ]
+    return "".join(cells).rstrip()
+
+
+def _log_type_row(
+    log_type: str,
     count: str,
     percentage: str,
-    status_percentage: Optional[str],
+    status_values: dict[str, str],
 ) -> str:
-    """Lay out one table row. Over-long labels push the columns rather than
-    being truncated: a decoder or location name is identifying information, and
-    silently cutting it would make two different sources read as one."""
+    """Lay out one log-type summary row without truncating its identifier."""
 
-    cells = [f"{status:<{_STATUS_WIDTH}}"]
-    if log_type is not None:
-        cells.append(f"{log_type:<{_LOG_TYPE_WIDTH}}")
-    cells.append(f"{count:>{_COUNT_WIDTH}}")
-    cells.append(f"{percentage:>{_PERCENT_WIDTH}}")
-    if status_percentage is not None:
-        cells.append(f"{status_percentage:>{_PERCENT_WIDTH}}")
+    cells = [
+        f"{log_type:<{_LOG_TYPE_WIDTH}}",
+        f"{count:>{_COUNT_WIDTH}}",
+        f"{percentage:>{_PERCENT_WIDTH}}",
+    ]
+    for status in STATUSES:
+        cells.append(f"{status_values.get(status, ''):>{_STATUS_COUNT_WIDTHS[status]}}")
     return "".join(cells).rstrip()
+
+
+def _percentage(part: int, whole: int) -> float:
+    return 0.0 if whole == 0 else 100.0 * part / whole
 
 
 def _single_row(value: str) -> str:
     """Keep one report field on one line.
 
-    ``sample_log`` is already collapsed by the analysis layer because it is
-    replayed into logtest. ``message_pattern`` is not: it is a grouping key and
+    sample_log is already collapsed by the analysis layer because it is
+    replayed into logtest. message_pattern is not: it is a grouping key and
     is reported verbatim, so a multi-line log would break the finding block
     across rows here. Collapsing is a rendering concern only and never changes
     the value a consumer reads from the model.

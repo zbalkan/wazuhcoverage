@@ -11,24 +11,45 @@ def _analysis() -> ArchiveAnalysis:
         total_events=10,
         malformed_lines=2,
         status_counts=(
-            StatusCount(status="no_decoder", event_count=6, percentage=60.0),
-            StatusCount(status="no_rule", event_count=4, percentage=40.0),
-            StatusCount(status="below_threshold", event_count=0, percentage=0.0),
-            StatusCount(status="at_or_above_threshold", event_count=0, percentage=0.0),
+            StatusCount(status="no_decoder", event_count=3, percentage=30.0),
+            StatusCount(status="no_rule", event_count=3, percentage=30.0),
+            StatusCount(status="at_or_above_threshold", event_count=3, percentage=30.0),
+            StatusCount(status="below_threshold", event_count=1, percentage=10.0),
         ),
         log_type_counts=(
             LogTypeCount(
+                status="no_rule",
+                log_type="sshd",
+                event_count=2,
+                percentage=20.0,
+                status_percentage=66.6666666667,
+            ),
+            LogTypeCount(
                 status="no_decoder",
                 log_type="/var/log/app.log",
-                event_count=6,
-                percentage=60.0,
+                event_count=3,
+                percentage=30.0,
+                status_percentage=100.0,
+            ),
+            LogTypeCount(
+                status="below_threshold",
+                log_type="sshd",
+                event_count=1,
+                percentage=10.0,
                 status_percentage=100.0,
             ),
             LogTypeCount(
                 status="no_rule",
                 log_type=None,
-                event_count=4,
-                percentage=40.0,
+                event_count=1,
+                percentage=10.0,
+                status_percentage=33.3333333333,
+            ),
+            LogTypeCount(
+                status="at_or_above_threshold",
+                log_type="sshd",
+                event_count=3,
+                percentage=30.0,
                 status_percentage=100.0,
             ),
         ),
@@ -36,32 +57,58 @@ def _analysis() -> ArchiveAnalysis:
     )
 
 
-def test_report_renders_both_percentage_columns() -> None:
+def _rendered_log_type_rows(analysis: ArchiveAnalysis) -> list[str]:
+    lines = render_report(analysis).splitlines()
+    header = next(
+        index
+        for index, line in enumerate(lines)
+        if line.startswith("Log type") and "at_or_above_threshold" in line
+    )
+    end = lines.index("", header + 1)
+    return lines[header + 1 : end]
+
+
+def test_report_renders_status_and_log_type_tables() -> None:
     lines = render_report(_analysis()).splitlines()
 
     assert "Status                          Events   % total" in lines
-    assert lines[lines.index("Status") + 3].split() == ["no_decoder", "6", "60.00%"]
+    assert lines[lines.index("Status") + 3].split() == ["no_decoder", "3", "30.00%"]
 
-    header = lines.index("Status                  Log type                                Events   % total  % status")
-    assert lines[header + 1].split() == ["no_decoder", "/var/log/app.log", "6", "60.00%", "100.00%"]
+    header = next(
+        line for line in lines if line.startswith("Log type") and "at_or_above_threshold" in line
+    )
+    assert header.split() == [
+        "Log",
+        "type",
+        "Events",
+        "%",
+        "total",
+        "no_decoder",
+        "no_rule",
+        "below_threshold",
+        "at_or_above_threshold",
+    ]
+
+
+def test_log_type_table_groups_statuses_into_one_row_per_type() -> None:
+    rows = _rendered_log_type_rows(_analysis())
+
+    sshd = next(row for row in rows if row.startswith("sshd"))
+    assert sshd.split() == ["sshd", "6", "60.00%", "0", "2", "1", "3"]
+
+
+def test_log_type_table_is_sorted_by_aggregate_event_count() -> None:
+    rows = _rendered_log_type_rows(_analysis())
+
+    assert [row.split()[0] for row in rows] == ["sshd", "/var/log/app.log", "-"]
 
 
 def test_report_renders_a_missing_log_type_as_a_dash() -> None:
-    # log_type is Optional in the model; rendering it must not raise or print
-    # the string "None" into a table an operator reads as data.
-    rows = [line.split() for line in render_report(_analysis()).splitlines()]
+    rows = _rendered_log_type_rows(_analysis())
 
-    assert ["no_rule", "-", "4", "40.00%", "100.00%"] in rows
-    assert not any("None" in line for line in rows)
-
-
-def test_report_preserves_the_order_the_analysis_produced() -> None:
-    # Ordering is decided in the analysis layer, by count descending. The
-    # renderer must not re-sort or regroup, or the two views would disagree.
-    text = render_report(_analysis())
-
-    assert text.index("no_decoder") < text.index("no_rule")
-    assert text.index("below_threshold") < text.index("at_or_above_threshold")
+    missing = next(row for row in rows if row.lstrip().startswith("-"))
+    assert missing.split() == ["-", "1", "10.00%", "0", "1", "0", "0"]
+    assert not any("None" in row for row in rows)
 
 
 def test_report_still_reports_totals_and_malformed_lines() -> None:
