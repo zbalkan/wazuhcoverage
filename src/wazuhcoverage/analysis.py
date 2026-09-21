@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import csv
+import os
+import tempfile
 from pathlib import Path
 from typing import Any, Optional, Union
 
@@ -24,11 +27,41 @@ def _load_duckdb() -> Any:
     return duckdb
 
 
+def _load_template_miner() -> Any:
+    """Build a drain3 template miner.
+
+    drain3 is an optional extra rather than a runtime dependency, so the import
+    error is translated into an actionable message instead of a traceback.
+    """
+
+    try:
+        from drain3 import TemplateMiner
+        from drain3.template_miner_config import TemplateMinerConfig
+    except ImportError as exc:
+        raise RuntimeError(
+            "Template mining requires drain3. Install it with: pip install 'wazuhcoverage[drain3]'"
+        ) from exc
+
+    # The config is constructed explicitly because drain3 otherwise loads a
+    # drain3.ini from the current working directory, which would make an
+    # archive's findings depend on where the command happened to run.
+    config = TemplateMinerConfig()
+    config.profiling_enabled = False
+    # No masking instructions are registered: the SQL normalizer already applies
+    # the conservative masks this project documents, and a second masking pass
+    # would silently widen them beyond what the README promises.
+    config.masking_instructions = []
+    # No persistence handler: state is per-archive, keeping the CLI's single
+    # piece of persistent state (history.db) as the only thing on disk.
+    return TemplateMiner(config=config)
+
+
 def analyze_archive(
     path: Union[str, Path],
     *,
     alert_threshold: int = DEFAULT_ALERT_THRESHOLD,
     skip_malformed: bool = True,
+    template_mining: bool = False,
 ) -> ArchiveAnalysis:
     """Analyze one Wazuh NDJSON archive.
 
@@ -40,6 +73,12 @@ def analyze_archive(
     ``ArchiveAnalysis.malformed_lines``. Skipped lines are excluded from
     ``total_events``, so the coverage denominator stays exact and auditable.
     Pass ``skip_malformed=False`` to reject the archive on the first bad line.
+
+    ``template_mining=True`` replaces the regex-normalized message with a Drain
+    template mined from the archive, which collapses variants the regex masks
+    cannot reach -- usernames, hostnames, paths and other categorical tokens.
+    It requires the ``drain3`` extra and changes ``Finding.finding_key``, so
+    findings produced with and without it are not comparable.
     """
 
     archive = Path(path).expanduser().resolve()
@@ -49,8 +88,12 @@ def analyze_archive(
     if alert_threshold < 0:
         raise ValueError("alert_threshold must be non-negative")
 
+    # Built before any work so a missing extra fails immediately rather than
+    # after a full archive scan.
+    miner = _load_template_miner() if template_mining else None
+
     if archive.stat().st_size == 0:
-        return _empty_analysis(archive)
+        return _empty_analysis(archive, template_mining=template_mining)
 
     duckdb = _load_duckdb()
     connection = duckdb.connect(":memory:")
@@ -58,6 +101,8 @@ def analyze_archive(
         connection.execute("SET TimeZone = 'UTC'")
         _create_events(connection, archive, skip_malformed=skip_malformed)
         _create_views(connection, alert_threshold)
+        use_templates = _create_template_map(connection, miner)
+        _create_finding_views(connection, use_templates=use_templates)
 
         malformed_lines = int(connection.execute("SELECT count(*) FROM events WHERE is_malformed").fetchone()[0])
         total_events = int(connection.execute("SELECT count(*) FROM classified_events").fetchone()[0])
@@ -147,6 +192,7 @@ def analyze_archive(
             status_counts=status_counts,
             log_type_counts=log_type_counts,
             findings=findings,
+            template_mining=template_mining,
         )
     finally:
         connection.close()
@@ -166,7 +212,7 @@ def _percentage(part: int, whole: int) -> float:
     return 0.0 if whole == 0 else 100.0 * part / whole
 
 
-def _empty_analysis(archive: Path) -> ArchiveAnalysis:
+def _empty_analysis(archive: Path, *, template_mining: bool = False) -> ArchiveAnalysis:
     return ArchiveAnalysis(
         path=archive,
         total_events=0,
@@ -176,6 +222,7 @@ def _empty_analysis(archive: Path) -> ArchiveAnalysis:
         ),
         log_type_counts=(),
         findings=(),
+        template_mining=template_mining,
     )
 
 
@@ -300,34 +347,140 @@ def _create_views(connection: Any, alert_threshold: int) -> None:
         """
     )
 
+
+def _create_template_map(connection: Any, miner: Optional[Any]) -> bool:
+    """Mine one Drain template per distinct normalized message.
+
+    Only the statuses that group by message text are mined. ``below_threshold``
+    is excluded because it groups by rule ID, where the rule is already the
+    semantic grouping and a mined template would add nothing.
+
+    The scan, the deduplication, the join and the counting all stay in DuckDB;
+    Drain only ever sees the distinct normalized strings, which keeps the cost
+    proportional to the archive's vocabulary rather than to its event count.
+
+    Drain is order dependent, so distinct messages are fed in sorted order.
+    drain3's ``cluster_id`` is deliberately not used as a key: it is assigned in
+    arrival order. Template IDs are derived from the sorted template text
+    instead, so the same archive always produces the same grouping.
+
+    Returns ``False`` when mining was not requested or found nothing to group.
+    """
+
+    if miner is None:
+        return False
+
     connection.execute(
         """
+        CREATE TEMP TABLE distinct_logs AS
+        SELECT
+            normalized_log,
+            row_number() OVER (ORDER BY normalized_log) AS log_id
+        FROM (
+            SELECT DISTINCT normalized_log
+            FROM normalized_events
+            WHERE observed_status IN ('no_decoder', 'no_rule')
+              AND full_log IS NOT NULL
+              AND full_log <> ''
+        )
+        """
+    )
+
+    rows = connection.execute("SELECT log_id, normalized_log FROM distinct_logs ORDER BY log_id").fetchall()
+    if not rows:
+        return False
+
+    # The template a message receives when it is inserted can still widen as
+    # later messages join the same cluster, so the cluster is recorded during
+    # the pass and the final template is read back only once every message has
+    # been seen. Mapping on the insertion-time template would split a cluster.
+    assignments = []
+    for row in rows:
+        assignments.append((int(row[0]), miner.add_log_message(str(row[1]))["cluster_id"]))
+
+    mined = {cluster.cluster_id: cluster.get_template() for cluster in miner.drain.clusters}
+    template_ids = {
+        template: index for index, template in enumerate(sorted({mined[cluster] for _, cluster in assignments}))
+    }
+
+    _load_log_templates(connection, [(log_id, template_ids[mined[cluster]]) for log_id, cluster in assignments])
+
+    connection.execute("CREATE TEMP TABLE templates (template_id INTEGER, log_template VARCHAR)")
+    connection.executemany(
+        "INSERT INTO templates VALUES (?, ?)",
+        [(template_id, template) for template, template_id in template_ids.items()],
+    )
+    return True
+
+
+def _load_log_templates(connection: Any, assignments: list[tuple[int, int]]) -> None:
+    """Load the log-ID to template-ID mapping through a temporary CSV file.
+
+    DuckDB's Python parameter binding costs roughly 140 microseconds per row for
+    bulk data -- about 25 seconds for one high-entropy archive -- while its CSV
+    reader loads the same rows in 0.2 seconds. Chunking the binding does not
+    help, so the mapping is handed over as a file instead.
+
+    Only integers are written. No log text passes through CSV quoting, so an
+    embedded delimiter, quote or newline in a message cannot corrupt the join
+    key. The file is removed before this function returns.
+    """
+
+    handle, path = tempfile.mkstemp(prefix="wazuhcoverage-templates-", suffix=".csv")
+    os.close(handle)
+    try:
+        with open(path, "w", newline="", encoding="utf-8") as stream:
+            csv.writer(stream).writerows(assignments)
+        connection.execute(
+            "CREATE TEMP TABLE log_templates AS SELECT * FROM "
+            "read_csv(?, header = false, columns = {'log_id': 'BIGINT', 'template_id': 'INTEGER'})",
+            [path],
+        )
+    finally:
+        os.unlink(path)
+
+
+def _create_finding_views(connection: Any, *, use_templates: bool) -> None:
+    # coalesce() keeps the regex-normalized message as the fallback so a row
+    # that somehow missed the join still groups rather than collapsing to NULL.
+    pattern = "coalesce(t.log_template, n.normalized_log)" if use_templates else "n.normalized_log"
+    source = (
+        """normalized_events n
+        LEFT JOIN distinct_logs d ON d.normalized_log = n.normalized_log
+        LEFT JOIN log_templates lt ON lt.log_id = d.log_id
+        LEFT JOIN templates t ON t.template_id = lt.template_id"""
+        if use_templates
+        else "normalized_events n"
+    )
+
+    connection.execute(
+        f"""
         CREATE TEMP VIEW finding_events AS
         SELECT
-            *,
+            n.*,
             CASE
-                WHEN observed_status = 'below_threshold' THEN concat('rule:', coalesce(rule_id, 'unknown'))
-                ELSE normalized_log
+                WHEN n.observed_status = 'below_threshold' THEN concat('rule:', coalesce(n.rule_id, 'unknown'))
+                ELSE {pattern}
             END AS message_pattern,
             CASE
-                WHEN observed_status = 'below_threshold' THEN NULL
-                ELSE log_type
+                WHEN n.observed_status = 'below_threshold' THEN NULL
+                ELSE n.log_type
             END AS finding_log_type,
             CASE
-                WHEN observed_status = 'below_threshold' THEN NULL
-                ELSE decoder_name
+                WHEN n.observed_status = 'below_threshold' THEN NULL
+                ELSE n.decoder_name
             END AS finding_decoder,
             md5(
                 CASE
-                    WHEN observed_status = 'below_threshold'
-                        THEN concat(observed_status, '|', coalesce(rule_id, 'unknown'))
-                    ELSE concat(observed_status, '|', log_type, '|', normalized_log)
+                    WHEN n.observed_status = 'below_threshold'
+                        THEN concat(n.observed_status, '|', coalesce(n.rule_id, 'unknown'))
+                    ELSE concat(n.observed_status, '|', n.log_type, '|', {pattern})
                 END
             ) AS finding_key
-        FROM normalized_events
-        WHERE observed_status <> 'at_or_above_threshold'
-          AND full_log IS NOT NULL
-          AND full_log <> ''
+        FROM {source}
+        WHERE n.observed_status <> 'at_or_above_threshold'
+          AND n.full_log IS NOT NULL
+          AND n.full_log <> ''
         """
     )
 

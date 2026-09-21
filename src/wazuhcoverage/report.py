@@ -24,6 +24,7 @@ def render_report(analysis: ArchiveAnalysis) -> str:
         f"Archive: {analysis.path}",
         f"Total events: {analysis.total_events:,}",
         f"Malformed lines skipped: {analysis.malformed_lines:,}",
+        f"Pattern source: {'drain3 template mining' if analysis.template_mining else 'regex normalization'}",
         "",
         "Status",
         "------",

@@ -41,8 +41,15 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Template mining is optional on purpose: DuckDB stays the only dependency a
+# default install pulls in. drain3 is pure Python and imposes no floor of its
+# own, so it does not disturb the 3.9 compatibility floor.
+drain3 = [
+  "drain3>=0.9.11,<1",
+]
 test = [
   "pytest>=8,<10",
+  "drain3>=0.9.11,<1",
 ]
 build = [
   "build>=1.2",
@@ -50,6 +57,7 @@ build = [
 ]
 dev = [
   "pytest>=8,<10",
+  "drain3>=0.9.11,<1",
   "ruff>=0.8",
   "build>=1.2",
   "twine>=5",

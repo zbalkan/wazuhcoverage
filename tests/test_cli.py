@@ -14,7 +14,34 @@ def test_cli_flags_and_targets() -> None:
 
     assert args.ignore_history is True
     assert args.no_stats is True
+    assert args.template_mining is False
     assert args.targets == ["/archives/**/*.json.gz", "/other/a.json.gz"]
+
+
+def test_template_mining_flag_defaults_off_and_parses() -> None:
+    assert cli.build_parser().parse_args(["a.json"]).template_mining is False
+    assert cli.build_parser().parse_args(["--template-mining", "a.json"]).template_mining is True
+
+
+def test_cli_forwards_template_mining_to_the_analysis(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys
+) -> None:
+    archive = tmp_path / "archive.json.gz"
+    archive.touch()
+    received: list[dict] = []
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cli, "resolve_targets", lambda _targets: [archive])
+    monkeypatch.setattr(
+        cli,
+        "analyze_archive",
+        lambda path, **kwargs: received.append(kwargs) or _analysis(path),
+    )
+    monkeypatch.setattr(cli, "render_report", lambda _analysis: "report\n")
+
+    assert cli.main(["--template-mining", str(archive)]) == 0
+    assert received == [{"alert_threshold": 3, "skip_malformed": True, "template_mining": True}]
+    capsys.readouterr()
 
 
 def _analysis(path: Path) -> ArchiveAnalysis:
@@ -60,7 +87,7 @@ def test_no_stats_keeps_stdout_machine_clean(monkeypatch: pytest.MonkeyPatch, tm
 
     monkeypatch.setattr(cli, "History", FakeHistory)
     monkeypatch.setattr(cli, "resolve_targets", lambda _targets: [archive])
-    monkeypatch.setattr(cli, "analyze_archive", lambda path, alert_threshold, skip_malformed: _analysis(path))
+    monkeypatch.setattr(cli, "analyze_archive", lambda path, **_kwargs: _analysis(path))
 
     assert cli.main(["--no-stats", str(archive)]) == 0
     captured = capsys.readouterr()
@@ -91,7 +118,7 @@ def test_ignore_history_processes_hit_and_retains_history(monkeypatch: pytest.Mo
     monkeypatch.setattr(
         cli,
         "analyze_archive",
-        lambda path, alert_threshold, skip_malformed: analyzed.append(path) or _analysis(path),
+        lambda path, **_kwargs: analyzed.append(path) or _analysis(path),
     )
     monkeypatch.setattr(cli, "render_report", lambda _analysis: "report\n")
 
@@ -145,7 +172,7 @@ def test_broken_pipe_does_not_update_history(monkeypatch: pytest.MonkeyPatch, tm
 
     monkeypatch.setattr(cli, "History", FakeHistory)
     monkeypatch.setattr(cli, "resolve_targets", lambda _targets: [archive])
-    monkeypatch.setattr(cli, "analyze_archive", lambda path, alert_threshold, skip_malformed: _analysis(path))
+    monkeypatch.setattr(cli, "analyze_archive", lambda path, **_kwargs: _analysis(path))
     monkeypatch.setattr(cli.sys, "stdout", BrokenPipeStdout())
 
     assert cli.main(["--no-stats", str(archive)]) == 1

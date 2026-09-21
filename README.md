@@ -8,6 +8,8 @@ The CLI keeps only one piece of persistent state: `history.db`, an internal JSON
 
 Python 3.9 or newer on Linux, macOS, or Windows. DuckDB is the only runtime dependency and is installed automatically.
 
+Optional Drain template mining additionally requires [drain3](https://github.com/IBM/Drain3), installed with the `drain3` extra. It is pure Python, imposes no interpreter floor of its own, and is never imported unless template mining is requested.
+
 Python 3.9 is supported as a compatibility floor for hosts that still ship it, and it constrains the DuckDB version. DuckDB dropped 3.9 in 1.5.0, so the dependency is capped at `duckdb<1.5` on 3.9 via an explicit environment marker; such installs stay on the 1.4.x line, which no longer receives upstream fixes. Python 3.10 or newer is recommended wherever the host allows it.
 
 Because 3.9 cannot evaluate PEP 604 `X | None` annotations at runtime, the public models are annotated with `typing.Optional` and `typing.Union`. This keeps `typing.get_type_hints()` working on every supported interpreter, so consumers that introspect annotations at runtime behave identically across the range.
@@ -27,6 +29,12 @@ Upgrade or remove it with:
 ```bash
 pipx upgrade wazuhcoverage
 pipx uninstall wazuhcoverage
+```
+
+With optional Drain template mining:
+
+```bash
+pipx install "wazuhcoverage[drain3]"
 ```
 
 From a local checkout:
@@ -79,7 +87,7 @@ Multiple targets may be supplied. Overlapping patterns are deduplicated and proc
 The CLI intentionally has no subcommands:
 
 ```text
-wazuhcoverage [--ignore-history] [--no-stats] [--strict] TARGET [TARGET...]
+wazuhcoverage [--ignore-history] [--no-stats] [--strict] [--template-mining] TARGET [TARGET...]
 ```
 
 ### Ignore history
@@ -99,6 +107,20 @@ wazuhcoverage --strict "/archives/**/*.json.gz"
 By default a line that DuckDB cannot parse as a JSON object is skipped, counted, and reported; the archive still produces a result. `--strict` restores fail-fast behaviour, rejecting the whole archive on the first such line.
 
 Skipping is the default because a single truncated line — the usual result of a rotated or partially written archive — would otherwise discard an entire day of coverage data. The count is never hidden: it appears as `Malformed lines skipped` in the report, as a `wazuhcoverage: skipped N unparseable line(s)` warning on stderr, and as `ArchiveAnalysis.malformed_lines` in the API.
+
+### Template mining
+
+```bash
+wazuhcoverage --template-mining "/archives/**/*.json.gz"
+```
+
+Groups `no_decoder` and `no_rule` events by a Drain template mined from the archive instead of by the regex-normalized message. This requires the `drain3` extra; without it the run fails immediately with an install hint rather than silently falling back, because a silent fallback would produce different finding keys under the same command.
+
+The default normalizer masks syntactic variance only: timestamps, UUIDs, long hexadecimal values and long decimal numbers. It cannot collapse categorical variance such as usernames, hostnames, file paths, commands or URL routes without enumerating them, so a high-entropy archive can yield nearly as many findings as it has events. Template mining closes that gap by detecting which token positions vary across the archive. On a synthetic 200,000-event archive drawn from eight log families, regex normalization produced 181,425 findings and template mining produced 12.
+
+The cost is precision. Drain merges by positional shape, so messages that share a shape but differ in meaning land in one finding, and `message_pattern` reports `<*>` where a username or path was. `sample_log` is unaffected and remains a real raw line, so piping to `wazuh-logtest` behaves identically. `Finding.finding_key` differs between the two modes, so findings produced with and without the flag must not be compared or diffed; `ArchiveAnalysis.template_mining` and the `Pattern source` line in the report record which mode produced a result.
+
+Mined state is per archive and is never written to disk, so `history.db` remains the only persistent state. That also means templates are re-derived for each archive rather than accumulated across them.
 
 ### Samples only
 
@@ -131,7 +153,7 @@ from wazuhcoverage import (
 )
 ```
 
-`analyze_archive()` accepts either `str` or `pathlib.Path` and returns an `ArchiveAnalysis`. Pass `skip_malformed=False` for the fail-fast behaviour that `--strict` selects. CLI concerns such as glob expansion, `history.db`, report rendering, stdout/stderr, and exit codes are intentionally outside the analysis API.
+`analyze_archive()` accepts either `str` or `pathlib.Path` and returns an `ArchiveAnalysis`. Pass `skip_malformed=False` for the fail-fast behaviour that `--strict` selects, and `template_mining=True` for the Drain grouping that `--template-mining` selects. The latter raises `RuntimeError` when the `drain3` extra is not installed. CLI concerns such as glob expansion, `history.db`, report rendering, stdout/stderr, and exit codes are intentionally outside the analysis API.
 
 ## Statistics
 
@@ -182,6 +204,8 @@ The CLI currently uses an alert threshold of 3. The library accepts an alternate
 `below_threshold` events are grouped by rule ID because the rule is already the semantic grouping. Such findings deliberately do not claim one arbitrary log type even when that rule appears across several decoders or sources; log-type population statistics remain available separately in `ArchiveAnalysis.log_type_counts`.
 
 `no_decoder` and `no_rule` events are grouped by log type and a conservative normalized message pattern. The normalizer currently replaces common timestamp prefixes, UUIDs, long hexadecimal values, and decimal numbers with five or more digits. Short numbers, IP addresses, ports, usernames, paths, event IDs, and HTTP status codes are deliberately retained.
+
+`--template-mining` replaces that normalized message with a Drain template for the same two statuses, trading the retention guarantee above for far fewer findings on archives whose messages carry many categorical tokens. DuckDB still performs the scan, the deduplication, the join and the counting; Drain only sees the distinct normalized strings, so the added cost scales with an archive's vocabulary rather than with its event count. Distinct messages are fed in sorted order and findings are keyed on the template text rather than on drain3's arrival-ordered `cluster_id`, so a given archive always yields the same findings. `below_threshold` grouping is untouched, because a rule ID is already the semantic grouping.
 
 Malformed NDJSON is skipped rather than ignored. The distinction matters because ignoring it would corrupt the coverage denominator: DuckDB does not drop an unparseable line when errors are tolerated, it yields a NULL document, which would extract as an event with no decoder and inflate both `total_events` and the `no_decoder` bucket. Such lines are therefore excluded from every bucket and reported separately as `malformed_lines`, so the buckets still sum exactly to `total_events`. Lines that parse but are not objects — a bare scalar, array, or `null` — are rejected by strict mode too and are accounted for the same way; blank and whitespace-only lines are not data loss and are not counted.
 
