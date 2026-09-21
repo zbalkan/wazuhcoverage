@@ -174,9 +174,11 @@ def test_messages_containing_csv_metacharacters_still_group_correctly(tmp_path: 
 
     assert result.total_events == 3
     assert sum(f.event_count for f in result.findings) == 3
-    # Whatever Drain decides to merge, no event may be lost and no sample may be
-    # a synthesized string rather than a real raw line.
-    assert all(f.sample_log in nasty for f in result.findings)
+    # Whatever Drain decides to merge, no event may be lost. Samples remain
+    # source-derived, with only CR/LF runs collapsed for the one-row logtest
+    # contract.
+    expected_samples = {text.replace("\r\n", " ").replace("\n", " ") for text in nasty}
+    assert all(f.sample_log in expected_samples for f in result.findings)
 
 
 def test_distinct_families_are_not_merged(tmp_path: Path) -> None:

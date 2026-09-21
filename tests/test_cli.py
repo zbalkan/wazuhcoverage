@@ -217,7 +217,7 @@ def test_no_stats_emits_exactly_one_row_per_finding(
 
     monkeypatch.setattr(cli, "History", FakeHistory)
     monkeypatch.setattr(cli, "resolve_targets", lambda _targets: [archive])
-    monkeypatch.setattr(cli, "analyze_archive", lambda path, alert_threshold, skip_malformed: analysis)
+    monkeypatch.setattr(cli, "analyze_archive", lambda path, **_kwargs: analysis)
 
     assert cli.main(["--no-stats", str(archive)]) == 0
     captured = capsys.readouterr()
