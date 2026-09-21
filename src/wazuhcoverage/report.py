@@ -11,6 +11,7 @@ def render_report(analysis: ArchiveAnalysis) -> str:
     lines: list[str] = [
         f"Archive: {analysis.path}",
         f"Total events: {analysis.total_events:,}",
+        f"Malformed lines skipped: {analysis.malformed_lines:,}",
         "",
         "Status",
         "------",

@@ -24,11 +24,22 @@ def _load_duckdb() -> Any:
     return duckdb
 
 
-def analyze_archive(path: Union[str, Path], *, alert_threshold: int = DEFAULT_ALERT_THRESHOLD) -> ArchiveAnalysis:
+def analyze_archive(
+    path: Union[str, Path],
+    *,
+    alert_threshold: int = DEFAULT_ALERT_THRESHOLD,
+    skip_malformed: bool = True,
+) -> ArchiveAnalysis:
     """Analyze one Wazuh NDJSON archive.
 
     The compressed/uncompressed source is scanned once into a temporary table.
     All subsequent classification, grouping and sampling runs against that table.
+
+    A line DuckDB cannot parse as a JSON object is skipped rather than failing
+    the whole archive, and the number of such lines is reported as
+    ``ArchiveAnalysis.malformed_lines``. Skipped lines are excluded from
+    ``total_events``, so the coverage denominator stays exact and auditable.
+    Pass ``skip_malformed=False`` to reject the archive on the first bad line.
     """
 
     archive = Path(path).expanduser().resolve()
@@ -45,9 +56,10 @@ def analyze_archive(path: Union[str, Path], *, alert_threshold: int = DEFAULT_AL
     connection = duckdb.connect(":memory:")
     try:
         connection.execute("SET TimeZone = 'UTC'")
-        _create_events(connection, archive)
+        _create_events(connection, archive, skip_malformed=skip_malformed)
         _create_views(connection, alert_threshold)
 
+        malformed_lines = int(connection.execute("SELECT count(*) FROM events WHERE is_malformed").fetchone()[0])
         total_events = int(connection.execute("SELECT count(*) FROM classified_events").fetchone()[0])
 
         raw_statuses = dict(
@@ -108,6 +120,7 @@ def analyze_archive(path: Union[str, Path], *, alert_threshold: int = DEFAULT_AL
         return ArchiveAnalysis(
             path=archive,
             total_events=total_events,
+            malformed_lines=malformed_lines,
             status_counts=status_counts,
             log_type_counts=log_type_counts,
             findings=findings,
@@ -124,23 +137,35 @@ def _empty_analysis(archive: Path) -> ArchiveAnalysis:
     return ArchiveAnalysis(
         path=archive,
         total_events=0,
+        malformed_lines=0,
         status_counts=tuple(StatusCount(status, 0) for status in STATUSES),
         log_type_counts=(),
         findings=(),
     )
 
 
-def _create_events(connection: Any, archive: Path) -> None:
+def _create_events(connection: Any, archive: Path, *, skip_malformed: bool) -> None:
     archive_sql = _sql_literal(str(archive))
+    ignore_errors = "true" if skip_malformed else "false"
 
     # Reading the objects as JSON rather than relying on automatic structural
     # inference makes the envelope stable when an archive happens to contain no
     # rule objects or contains empty decoder objects ("decoder": {}).
+    #
+    # ignore_errors = true does not drop an unparseable line: DuckDB yields a
+    # NULL document in its place. Such a row would otherwise extract as all-NULL
+    # fields and be classified as no_decoder, inflating both the event total and
+    # that bucket. It is therefore tagged here and excluded from classification,
+    # which keeps the coverage denominator exact while still counting the loss.
+    # A line that parses but is not an object -- a bare scalar, array or null --
+    # is rejected by strict mode too, so it is tagged the same way.
     connection.execute(
         f"""
         CREATE TEMP TABLE events AS
         WITH extracted AS (
-            SELECT json_extract_string(
+            SELECT
+                (json IS NULL OR json_type(json) <> 'OBJECT') AS is_malformed,
+                json_extract_string(
                 json,
                 [
                     '$.timestamp',
@@ -156,9 +181,10 @@ def _create_events(connection: Any, archive: Path) -> None:
                     '$.rule.description'
                 ]
             ) AS fields
-            FROM read_ndjson_objects({archive_sql}, ignore_errors = false)
+            FROM read_ndjson_objects({archive_sql}, ignore_errors = {ignore_errors})
         )
         SELECT
+            is_malformed,
             try_cast(fields[1] AS TIMESTAMPTZ) AS event_timestamp,
             fields[2] AS agent_id,
             fields[3] AS agent_name,
@@ -180,7 +206,7 @@ def _create_views(connection: Any, alert_threshold: int) -> None:
         f"""
         CREATE TEMP VIEW classified_events AS
         SELECT
-            *,
+            * EXCLUDE (is_malformed),
             CASE
                 WHEN nullif(decoder_name, '') IS NULL THEN 'no_decoder'
                 WHEN nullif(rule_id, '') IS NULL THEN 'no_rule'
@@ -194,6 +220,7 @@ def _create_views(connection: Any, alert_threshold: int) -> None:
                 ELSE 'unknown'
             END AS log_type
         FROM events
+        WHERE NOT is_malformed
         """
     )
 

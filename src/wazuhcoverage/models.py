@@ -52,6 +52,10 @@ class Finding:
 class ArchiveAnalysis:
     path: Path
     total_events: int
+    # Lines DuckDB could not parse as a JSON object. They are excluded from
+    # total_events and from every bucket, so coverage percentages stay exact;
+    # this field is what makes the loss visible rather than silent.
+    malformed_lines: int
     status_counts: tuple[StatusCount, ...]
     log_type_counts: tuple[LogTypeCount, ...]
     findings: tuple[Finding, ...]

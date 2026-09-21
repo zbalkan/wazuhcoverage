@@ -33,6 +33,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Write only one representative sample per finding to stdout; suitable for piping to logtest.",
     )
     parser.add_argument(
+        "--strict",
+        action="store_true",
+        help="Fail an archive on the first unparseable line instead of skipping and counting it.",
+    )
+    parser.add_argument(
         "targets",
         nargs="+",
         metavar="TARGET",
@@ -67,7 +72,20 @@ def main(argv: Optional[list[str]] = None) -> int:
         print(f"Processing {archive}", file=sys.stderr)
 
         try:
-            analysis = analyze_archive(archive, alert_threshold=DEFAULT_ALERT_THRESHOLD)
+            analysis = analyze_archive(
+                archive,
+                alert_threshold=DEFAULT_ALERT_THRESHOLD,
+                skip_malformed=not args.strict,
+            )
+
+            # Surface the loss on stderr too: with --no-stats the report that
+            # carries this count is never rendered, and a silently shrunken
+            # denominator is exactly what makes coverage numbers untrustworthy.
+            if analysis.malformed_lines:
+                print(
+                    f"wazuhcoverage: skipped {analysis.malformed_lines} unparseable line(s) in {archive}",
+                    file=sys.stderr,
+                )
 
             if args.no_stats:
                 for finding in analysis.findings:

@@ -163,12 +163,70 @@ def test_empty_archive_returns_zero_counts(tmp_path: Path) -> None:
     assert result.findings == ()
 
 
-def test_malformed_json_is_not_silently_ignored(tmp_path: Path) -> None:
+def test_malformed_line_is_skipped_and_counted_not_silently_dropped(tmp_path: Path) -> None:
+    archive = tmp_path / "archives.json"
+    archive.write_text('{"full_log": "valid"}\n{not-json}\n', encoding="utf-8")
+
+    result = analyze_archive(archive)
+
+    # The bad line must not survive as an all-NULL event: that would land in
+    # no_decoder and quietly inflate the denominator it is meant to exclude.
+    assert result.malformed_lines == 1
+    assert result.total_events == 1
+    counts = {item.status: item.event_count for item in result.status_counts}
+    assert sum(counts.values()) == result.total_events
+    assert counts["no_decoder"] == 1
+
+
+def test_strict_mode_still_rejects_a_malformed_archive(tmp_path: Path) -> None:
     archive = tmp_path / "archives.json"
     archive.write_text('{"full_log": "valid"}\n{not-json}\n', encoding="utf-8")
 
     with pytest.raises(duckdb.Error):
-        analyze_archive(archive)
+        analyze_archive(archive, skip_malformed=False)
+
+
+def test_non_object_lines_count_as_malformed_and_blank_lines_do_not(tmp_path: Path) -> None:
+    archive = tmp_path / "archives.json"
+    # Bare scalars, arrays and null parse as JSON but are not events; strict
+    # mode rejects them, so they are accounted for the same way. Blank and
+    # whitespace-only lines are not data loss and must not be counted.
+    archive.write_text(
+        '{"full_log": "valid", "decoder": {}}\n\n   \nnull\n[1, 2]\n"scalar"\n42\n',
+        encoding="utf-8",
+    )
+
+    result = analyze_archive(archive)
+
+    assert result.total_events == 1
+    assert result.malformed_lines == 4
+
+
+def test_clean_archive_reports_no_malformed_lines(tmp_path: Path) -> None:
+    archive = tmp_path / "archives.json"
+    _write_jsonl(archive, _fixture_rows())
+
+    assert analyze_archive(archive).malformed_lines == 0
+
+
+def test_malformed_lines_are_counted_identically_when_compressed(tmp_path: Path) -> None:
+    rows = _fixture_rows()
+    plain = tmp_path / "archives.json"
+    compressed = tmp_path / "archives.json.gz"
+    _write_jsonl(plain, rows)
+    _write_jsonl_gz(compressed, rows)
+    with plain.open("a", encoding="utf-8") as stream:
+        stream.write("{not-json}\n")
+    import gzip as _gzip
+
+    with _gzip.open(compressed, "at", encoding="utf-8") as stream:
+        stream.write("{not-json}\n")
+
+    plain_result = analyze_archive(plain)
+    compressed_result = analyze_archive(compressed)
+
+    assert plain_result.malformed_lines == compressed_result.malformed_lines == 1
+    assert plain_result.total_events == compressed_result.total_events == len(rows)
 
 
 def test_representative_sample_is_deterministic(tmp_path: Path) -> None:

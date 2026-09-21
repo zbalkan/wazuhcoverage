@@ -79,7 +79,7 @@ Multiple targets may be supplied. Overlapping patterns are deduplicated and proc
 The CLI intentionally has no subcommands:
 
 ```text
-wazuhcoverage [--ignore-history] [--no-stats] TARGET [TARGET...]
+wazuhcoverage [--ignore-history] [--no-stats] [--strict] TARGET [TARGET...]
 ```
 
 ### Ignore history
@@ -89,6 +89,16 @@ wazuhcoverage --ignore-history "/archives/**/*.json.gz"
 ```
 
 The archive is processed even if its absolute path is already present in `history.db`. A successful run still records or retains the path in history.
+
+### Strict parsing
+
+```bash
+wazuhcoverage --strict "/archives/**/*.json.gz"
+```
+
+By default a line that DuckDB cannot parse as a JSON object is skipped, counted, and reported; the archive still produces a result. `--strict` restores fail-fast behaviour, rejecting the whole archive on the first such line.
+
+Skipping is the default because a single truncated line — the usual result of a rotated or partially written archive — would otherwise discard an entire day of coverage data. The count is never hidden: it appears as `Malformed lines skipped` in the report, as a `wazuhcoverage: skipped N unparseable line(s)` warning on stderr, and as `ArchiveAnalysis.malformed_lines` in the API.
 
 ### Samples only
 
@@ -119,7 +129,7 @@ from wazuhcoverage import (
 )
 ```
 
-`analyze_archive()` accepts either `str` or `pathlib.Path` and returns an `ArchiveAnalysis`. CLI concerns such as glob expansion, `history.db`, report rendering, stdout/stderr, and exit codes are intentionally outside the analysis API.
+`analyze_archive()` accepts either `str` or `pathlib.Path` and returns an `ArchiveAnalysis`. Pass `skip_malformed=False` for the fail-fast behaviour that `--strict` selects. CLI concerns such as glob expansion, `history.db`, report rendering, stdout/stderr, and exit codes are intentionally outside the analysis API.
 
 ## Classification
 
@@ -142,7 +152,9 @@ The CLI currently uses an alert threshold of 3. The library accepts an alternate
 
 `no_decoder` and `no_rule` events are grouped by log type and a conservative normalized message pattern. The normalizer currently replaces common timestamp prefixes, UUIDs, long hexadecimal values, and decimal numbers with five or more digits. Short numbers, IP addresses, ports, usernames, paths, event IDs, and HTTP status codes are deliberately retained.
 
-Malformed NDJSON is not silently ignored because doing so would corrupt the coverage denominator. Compressed `.json.gz` and uncompressed NDJSON archives are both supported directly by DuckDB.
+Malformed NDJSON is skipped rather than ignored. The distinction matters because ignoring it would corrupt the coverage denominator: DuckDB does not drop an unparseable line when errors are tolerated, it yields a NULL document, which would extract as an event with no decoder and inflate both `total_events` and the `no_decoder` bucket. Such lines are therefore excluded from every bucket and reported separately as `malformed_lines`, so the buckets still sum exactly to `total_events`. Lines that parse but are not objects — a bare scalar, array, or `null` — are rejected by strict mode too and are accounted for the same way; blank and whitespace-only lines are not data loss and are not counted.
+
+Compressed `.json.gz` and uncompressed NDJSON archives are both supported directly by DuckDB.
 
 ## Scope
 

@@ -20,6 +20,7 @@ def _analysis(path: Path) -> ArchiveAnalysis:
     return ArchiveAnalysis(
         path=path,
         total_events=1,
+        malformed_lines=0,
         status_counts=(),
         log_type_counts=(),
         findings=(
@@ -58,7 +59,7 @@ def test_no_stats_keeps_stdout_machine_clean(monkeypatch: pytest.MonkeyPatch, tm
 
     monkeypatch.setattr(cli, "History", FakeHistory)
     monkeypatch.setattr(cli, "resolve_targets", lambda _targets: [archive])
-    monkeypatch.setattr(cli, "analyze_archive", lambda path, alert_threshold: _analysis(path))
+    monkeypatch.setattr(cli, "analyze_archive", lambda path, alert_threshold, skip_malformed: _analysis(path))
 
     assert cli.main(["--no-stats", str(archive)]) == 0
     captured = capsys.readouterr()
@@ -89,7 +90,7 @@ def test_ignore_history_processes_hit_and_retains_history(monkeypatch: pytest.Mo
     monkeypatch.setattr(
         cli,
         "analyze_archive",
-        lambda path, alert_threshold: analyzed.append(path) or _analysis(path),
+        lambda path, alert_threshold, skip_malformed: analyzed.append(path) or _analysis(path),
     )
     monkeypatch.setattr(cli, "render_report", lambda _analysis: "report\n")
 
@@ -143,7 +144,7 @@ def test_broken_pipe_does_not_update_history(monkeypatch: pytest.MonkeyPatch, tm
 
     monkeypatch.setattr(cli, "History", FakeHistory)
     monkeypatch.setattr(cli, "resolve_targets", lambda _targets: [archive])
-    monkeypatch.setattr(cli, "analyze_archive", lambda path, alert_threshold: _analysis(path))
+    monkeypatch.setattr(cli, "analyze_archive", lambda path, alert_threshold, skip_malformed: _analysis(path))
     monkeypatch.setattr(cli.sys, "stdout", BrokenPipeStdout())
 
     assert cli.main(["--no-stats", str(archive)]) == 1
