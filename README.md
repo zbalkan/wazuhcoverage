@@ -4,6 +4,14 @@
 
 The CLI keeps only one piece of persistent state: `history.db`, an internal JSON array representing the set of successfully processed absolute archive paths. Updates are serialized with a small sidecar lock and written atomically. The library API has no dependency on that history mechanism.
 
+## Requirements
+
+Python 3.9 or newer on Linux, macOS, or Windows. DuckDB is the only runtime dependency and is installed automatically.
+
+Python 3.9 is supported as a compatibility floor for hosts that still ship it, and it constrains the DuckDB version. DuckDB dropped 3.9 in 1.5.0, so the dependency is capped at `duckdb<1.5` on 3.9 via an explicit environment marker; such installs stay on the 1.4.x line, which no longer receives upstream fixes. Python 3.10 or newer is recommended wherever the host allows it.
+
+Because 3.9 cannot evaluate PEP 604 `X | None` annotations at runtime, the public models are annotated with `typing.Optional` and `typing.Union`. This keeps `typing.get_type_hints()` working on every supported interpreter, so consumers that introspect annotations at runtime behave identically across the range.
+
 ## Installation
 
 ### Command-line use

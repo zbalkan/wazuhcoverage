@@ -7,6 +7,7 @@ import io
 import os
 import sys
 from pathlib import Path
+from typing import Optional
 
 from wazuhcoverage.analysis import DEFAULT_ALERT_THRESHOLD, analyze_archive
 from wazuhcoverage.history import History
@@ -40,7 +41,7 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: Optional[list[str]] = None) -> int:
     args = build_parser().parse_args(argv)
     targets = resolve_targets(args.targets)
 

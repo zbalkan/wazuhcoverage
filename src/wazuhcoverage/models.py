@@ -4,7 +4,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Optional
 
+# These dataclasses are part of the public, py.typed API, so their annotations
+# must stay resolvable at runtime on every supported interpreter. Optional[...]
+# is used instead of PEP 604 "X | None" because Python 3.9 cannot evaluate the
+# union operator when a consumer calls typing.get_type_hints(). PEP 585 builtin
+# generics such as tuple[...] are subscriptable on 3.9 and are kept as-is.
 STATUSES = (
     "no_decoder",
     "no_rule",
@@ -22,7 +28,7 @@ class StatusCount:
 @dataclass(frozen=True)
 class LogTypeCount:
     status: str
-    log_type: str | None
+    log_type: Optional[str]
     event_count: int
 
 
@@ -30,15 +36,15 @@ class LogTypeCount:
 class Finding:
     finding_key: str
     observed_status: str
-    log_type: str | None
+    log_type: Optional[str]
     message_pattern: str
     event_count: int
     affected_agents: int
-    first_seen: str | None
-    last_seen: str | None
-    observed_decoder: str | None
-    observed_rule_id: str | None
-    observed_rule_level: int | None
+    first_seen: Optional[str]
+    last_seen: Optional[str]
+    observed_decoder: Optional[str]
+    observed_rule_id: Optional[str]
+    observed_rule_level: Optional[int]
     sample_log: str
 
 

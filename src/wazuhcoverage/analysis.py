@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional, Union
 
 from wazuhcoverage.models import STATUSES, ArchiveAnalysis, Finding, LogTypeCount, StatusCount
 
@@ -24,7 +24,7 @@ def _load_duckdb() -> Any:
     return duckdb
 
 
-def analyze_archive(path: str | Path, *, alert_threshold: int = DEFAULT_ALERT_THRESHOLD) -> ArchiveAnalysis:
+def analyze_archive(path: Union[str, Path], *, alert_threshold: int = DEFAULT_ALERT_THRESHOLD) -> ArchiveAnalysis:
     """Analyze one Wazuh NDJSON archive.
 
     The compressed/uncompressed source is scanned once into a temporary table.
@@ -116,7 +116,7 @@ def analyze_archive(path: str | Path, *, alert_threshold: int = DEFAULT_ALERT_TH
         connection.close()
 
 
-def _string_or_none(value: Any) -> str | None:
+def _string_or_none(value: Any) -> Optional[str]:
     return None if value is None else str(value)
 
 
