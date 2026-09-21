@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "wazuhcoverage"
-version = "0.2.0"
+version = "0.2.1"
 description = "Analyze coverage in Wazuh JSON archives using DuckDB"
 readme = "README.md"
 license = "GPL-2.0-only"
