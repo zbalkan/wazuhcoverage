@@ -8,11 +8,11 @@ import os
 import shutil
 import sys
 import tempfile
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, TypeVar, overload
 
 from wazuhcoverage import __version__
 from wazuhcoverage.analysis import DEFAULT_ALERT_THRESHOLD, analyze_archive
@@ -35,6 +35,63 @@ STDIN_LABEL = Path("<stdin>")
 # so a spooled stream has to be named for what it actually contains.
 _GZIP_MAGIC = b"\x1f\x8b"
 
+_Namespace = TypeVar("_Namespace")
+
+
+class _ArgumentParser(argparse.ArgumentParser):
+    """Argument parser that warns when the terminal version flag masks options."""
+
+    @overload
+    def parse_args(
+        self,
+        args: Optional[Iterable[str]] = None,
+        namespace: None = None,
+    ) -> argparse.Namespace:
+        ...
+
+    @overload
+    def parse_args(
+        self,
+        args: Optional[Iterable[str]],
+        namespace: _Namespace,
+    ) -> _Namespace:
+        ...
+
+    @overload
+    def parse_args(
+        self,
+        *,
+        namespace: _Namespace,
+    ) -> _Namespace:
+        ...
+
+    def parse_args(
+        self,
+        args: Optional[Iterable[str]] = None,
+        namespace: Any = None,
+    ) -> Any:
+        argument_list = list(sys.argv[1:] if args is None else args)
+        version_flags = {"-V", "--version"}
+        incompatible_flags = {
+            "-n",
+            "--no-stats",
+            "-s",
+            "--strict",
+            "-f",
+            "--log-format",
+            "-h",
+            "--help",
+        }
+
+        if version_flags.intersection(argument_list) and incompatible_flags.intersection(argument_list):
+            self._print_message(
+                f"{self.prog}: warning: -V/--version cannot be combined with other flags; "
+                "the other flags will not be used\n",
+                sys.stderr,
+            )
+
+        return super().parse_args(argument_list, namespace)
+
 
 def build_parser() -> argparse.ArgumentParser:
     # The two behaviour flags are single-character store_true options, so
@@ -48,7 +105,7 @@ def build_parser() -> argparse.ArgumentParser:
     # That is how getopt has always treated an option with an argument, so it
     # is documented rather than defended against, and the long forms stay the
     # spelling for anything written into a cron entry or a script.
-    parser = argparse.ArgumentParser(
+    parser = _ArgumentParser(
         prog="wazuhcoverage",
         description="Analyze Wazuh JSON archives and emit coverage statistics or representative samples.",
     )

@@ -112,7 +112,7 @@ Put `-f` anywhere else in a cluster and it swallows what follows it: `-fsn json`
 | `1` | At least one archive failed, or the downstream pipe closed early. |
 | `2` | No target was given or matched. |
 
-`--version` prints `wazuhcoverage <version>` to stdout and exits `0` without needing a target, so it is safe to call from a health check or a deployment script. The number it prints is the same one the installed distribution carries; `pyproject.toml` reads it from `wazuhcoverage.__version__`, so the two cannot disagree.
+`--version` prints `wazuhcoverage <version>` to stdout and exits `0` without needing a target, so it is safe to call from a health check or a deployment script. It cannot be combined with other flags: if any are supplied, they are not used and a warning is written to stderr. The number it prints is the same one the installed distribution carries; `pyproject.toml` reads it from `wazuhcoverage.__version__`, so the two cannot disagree.
 
 Progress lines, warnings, and the closing `Matched / Processed / Failed` summary always go to stderr. Only the report or the samples go to stdout, so redirecting stdout gives you a clean file either way. One failing archive does not stop the run; the others still process and the failure is named on stderr.
 

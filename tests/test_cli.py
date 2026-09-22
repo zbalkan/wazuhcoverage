@@ -37,6 +37,32 @@ def test_version_needs_no_target() -> None:
     assert exit_info.value.code == 0
 
 
+@pytest.mark.parametrize("version_flag", ["-V", "--version"])
+@pytest.mark.parametrize("other_flag", ["-n", "--strict", "-f"])
+def test_version_warns_when_combined_with_another_flag(
+    version_flag: str, other_flag: str, capsys
+) -> None:
+    arguments = [version_flag, other_flag]
+    if other_flag == "-f":
+        arguments.append("json")
+
+    with pytest.raises(SystemExit) as exit_info:
+        cli.build_parser().parse_args(arguments)
+
+    captured = capsys.readouterr()
+    assert exit_info.value.code == 0
+    assert captured.out.strip().startswith("wazuhcoverage ")
+    assert "warning: -V/--version cannot be combined with other flags" in captured.err
+
+
+def test_version_does_not_warn_for_a_target(capsys) -> None:
+    with pytest.raises(SystemExit) as exit_info:
+        cli.build_parser().parse_args(["archive.json", "--version"])
+
+    assert exit_info.value.code == 0
+    assert capsys.readouterr().err == ""
+
+
 def test_short_flags_mirror_the_long_ones() -> None:
     parser = cli.build_parser()
 
