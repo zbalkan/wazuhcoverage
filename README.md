@@ -1,153 +1,102 @@
 # wazuhcoverage
 
-`wazuhcoverage` is a Python library and small batch CLI for measuring coverage in Wazuh JSON archives. It reads each archive once with DuckDB, classifies every event, groups unresolved or low-level events into findings, and selects one deterministic representative `full_log` sample per finding, emitted as a single row.
+`wazuhcoverage` answers one question about a Wazuh deployment: of everything the agents actually sent, how much did the ruleset do anything with? It reads a JSON archive, sorts every event into one of four coverage buckets, groups the uncovered ones into a short list of findings, and hands you one real log line per finding that you can replay through `wazuh-logtest`.
 
-The CLI keeps only one piece of persistent state: `history.db`, an internal JSON array representing the set of successfully processed absolute archive paths. Updates are serialized with a small sidecar lock and written atomically. The library API has no dependency on that history mechanism.
+It works on `archives.json` and `archives.json.gz` produced by `<logall_json>yes</logall_json>`, offline and read-only. It never contacts a manager, an API, or an indexer, so it is safe to run against a copy of an archive on a laptop.
+
+It ships as a library and a CLI in the same distribution. The CLI is a batch runner for a directory full of daily archives; the library is what you call when you want the numbers in your own program.
 
 ## Requirements
 
-Python 3.9 or newer on Linux, macOS, or Windows. Two runtime dependencies are installed automatically: DuckDB, which does the scanning and aggregation, and [drain3](https://github.com/IBM/Drain3), which mines the templates that group unresolved events. Both are mandatory; there is no build of this tool that groups without mining.
+Python 3.9 or newer on Linux, macOS, or Windows. Two runtime dependencies install automatically: [DuckDB](https://duckdb.org/), which scans and aggregates, and [drain3](https://github.com/IBM/Drain3), which mines the templates that group findings.
 
-drain3 is pure Python and imposes no interpreter floor, but version 0.9.11 ships as a source distribution only and pins `jsonpickle==1.5.1` and `cachetools==4.2.1` exactly. A `pipx` install is unaffected, because it gets an environment of its own and nothing else resolves against those pins. The constraint applies only when the library is installed into a shared environment, and only when that environment's own constraints exclude the pinned versions: a project requiring `cachetools>=5` cannot install wazuhcoverage at all, while one depending on `google-auth`, whose range is `cachetools>=2,<7`, resolves normally and simply lands on 4.2.1.
+Python 3.10 or newer is recommended. On 3.9 the DuckDB dependency is capped at `duckdb<1.5`, which no longer receives upstream fixes; 3.9 is kept only as a floor for hosts that still ship it.
 
-Adding a dependency is therefore the thing to be careful about, and the checks exist to enforce that rather than to describe today's tree. `tools/check_dependency_pins.py` walks the installed graph and fails when an exact pin appears or disappears; CI runs it on every supported interpreter alongside `pip check` and a from-scratch resolution, so a new dependency that narrows what this package can coexist with fails review instead of a user's install.
-
-Python 3.9 is supported as a compatibility floor for hosts that still ship it, and it constrains the DuckDB version. DuckDB dropped 3.9 in 1.5.0, so the dependency is capped at `duckdb<1.5` on 3.9 via an explicit environment marker; such installs stay on the 1.4.x line, which no longer receives upstream fixes. Python 3.10 or newer is recommended wherever the host allows it.
-
-Because 3.9 cannot evaluate PEP 604 `X | None` annotations at runtime, the public models are annotated with `typing.Optional` and `typing.Union`. This keeps `typing.get_type_hints()` working on every supported interpreter, so consumers that introspect annotations at runtime behave identically across the range.
+One caveat applies to shared environments rather than to `pipx`: drain3 0.9.11 pins `jsonpickle` and `cachetools` to exact versions, so a project that itself requires `cachetools>=5` cannot install this package alongside it. See [design notes](https://github.com/zbalkan/wazuhcoverage/blob/master/docs/design-notes.md#dependency-constraints) if you hit that.
 
 ## Installation
 
-### Command-line use
-
-For command-line use, install with [pipx](https://pipx.pypa.io/). It keeps the application and its dependencies in an isolated environment while exposing the `wazuhcoverage` command on your `PATH`:
+For command-line use, [pipx](https://pipx.pypa.io/) keeps the tool and its dependencies isolated while putting `wazuhcoverage` on your `PATH`:
 
 ```bash
 pipx install wazuhcoverage
-```
-
-Upgrade or remove it with:
-
-```bash
 pipx upgrade wazuhcoverage
 pipx uninstall wazuhcoverage
 ```
 
-From a local checkout:
-
-```bash
-pipx install --editable .
-```
-
-### Python library
-
-To use `wazuhcoverage` from another Python project, install it into that project's environment with pip:
+To use the library from another project, install it into that project's environment:
 
 ```bash
 python -m pip install wazuhcoverage
 ```
 
-Then import the public package API:
+From a local checkout, `pipx install --editable .` for the CLI or `python -m pip install -e .` for the library.
 
-```python
-from wazuhcoverage import ArchiveAnalysis, Finding, analyze_archive
+## Quick start
 
-analysis = analyze_archive("/archives/2026/09/archive.json.gz")
-print(analysis.total_events)
-
-for finding in analysis.findings:
-    print(finding.observed_status, finding.event_count, finding.sample_log)
-```
-
-The same PyPI distribution provides both the library and the console entry point. `pipx` is the recommended installation method for CLI-only use; `pip` is the recommended method when another Python project imports the library.
-
-### Development
+Point it at one archive and read the report:
 
 ```bash
-python -m pip install -e ".[dev]"
-python -m pytest
+wazuhcoverage /var/ossec/logs/archives/2026/Sep/ossec-archive-18.json.gz
 ```
 
-The Drain parameters are chosen by measurement, not by feel. `tools/tune_drain.py` rebuilds the labelled corpus they were selected against and prints the grid; re-run it after changing the normalizer, the corpus, or the drain3 version.
+Sweep a month, then replay everything that is not covered through logtest:
 
 ```bash
-python tools/tune_drain.py
+wazuhcoverage --no-stats "/var/ossec/logs/archives/2026/**/*.json.gz" | wazuh-logtest
 ```
 
-## CLI usage
-
-Literal files and glob patterns are accepted as positional arguments:
+Re-read archives you have already processed:
 
 ```bash
-wazuhcoverage /archives/2026/09/archive.json.gz
-wazuhcoverage "/archives/2026/09/*.json.gz"
-wazuhcoverage "/archives/**/*.json.gz"
+wazuhcoverage --ignore-history "/var/ossec/logs/archives/2026/**/*.json.gz"
 ```
 
-Multiple targets may be supplied. Overlapping patterns are deduplicated and processed in deterministic path order.
-
-The CLI intentionally has no subcommands:
+## Command line
 
 ```text
 wazuhcoverage [--ignore-history] [--no-stats] [--strict] TARGET [TARGET...]
 ```
 
-### Ignore history
+There are no subcommands. Each `TARGET` is a literal path or a glob; `**` recurses. Quote globs so the shell does not expand them first. Multiple targets are allowed, overlapping matches are deduplicated, and archives are processed in sorted path order.
 
-```bash
-wazuhcoverage --ignore-history "/archives/**/*.json.gz"
-```
+| Option | Effect |
+| --- | --- |
+| `--ignore-history` | Process an archive even if `history.db` already lists it. A successful run still records the path. |
+| `--no-stats` | Write only one representative log line per finding to stdout, one per row. Everything else goes to stderr. |
+| `--strict` | Reject the whole archive on the first unparseable line instead of skipping and counting it. |
 
-The archive is processed even if its absolute path is already present in `history.db`. A successful run still records or retains the path in history.
+| Exit code | Meaning |
+| --- | --- |
+| `0` | Every matched archive was processed. |
+| `1` | At least one archive failed, or the downstream pipe closed early. |
+| `2` | No target matched, or `history.db` could not be read. |
 
-### Strict parsing
+Progress lines, warnings, and the closing `Matched / Processed / Skipped / Failed` summary always go to stderr. Only the report or the samples go to stdout, so redirecting stdout gives you a clean file either way. One failing archive does not stop the run; the others still process and the failure is named on stderr.
 
-```bash
-wazuhcoverage --strict "/archives/**/*.json.gz"
-```
+### Processing history
 
-By default a line that DuckDB cannot parse as a JSON object is skipped, counted, and reported; the archive still produces a result. `--strict` restores fail-fast behaviour, rejecting the whole archive on the first such line.
+The CLI remembers which archives it has already handled in `history.db`, a JSON file written in the current working directory. An archive listed there is skipped on the next run, which is what makes a nightly cron entry over a growing archive directory cheap.
 
-Skipping is the default because a single truncated line — the usual result of a rotated or partially written archive — would otherwise discard an entire day of coverage data. The count is never hidden: it appears as `Malformed lines skipped` in the report, as a `wazuhcoverage: skipped N unparseable line(s)` warning on stderr, and as `ArchiveAnalysis.malformed_lines` in the API.
+A path is recorded only after analysis finished **and** stdout flushed, so a run that dies partway through, or whose downstream pipe closed, does not mark the archive as done. Delete the file to start over, or pass `--ignore-history` for one run. The library API does not use it.
 
-### Samples only
+### Replaying samples through logtest
 
-```bash
-wazuhcoverage --no-stats "/archives/**/*.json.gz"
-```
-
-`stdout` contains exactly one row per finding, each row a representative `full_log`. Progress, errors, and the run summary go to `stderr`, so output remains safe to pipe into another program:
+`--no-stats` exists for exactly one pipeline:
 
 ```bash
 wazuhcoverage --no-stats "/archives/**/*.json.gz" | wazuh-logtest
 ```
 
-One log per row is a contract, not a formatting preference. `wazuh-logtest` reads one log per line, so a multi-line sample — a stack trace, a wrapped EventChannel record, anything collected with `multi-line` or `multi-line-regex` — would be replayed as several unrelated logs: the first tested against the wrong decoder and the remainder as fragments no rule was ever written for. Runs of `CR`/`LF` inside the selected sample are therefore collapsed to a single space, and leading and trailing whitespace is trimmed. Nothing else is rewritten; tabs, spacing, and every other character reach logtest as the decoder would see them. `Finding.sample_log` carries the same single-row value, so an API consumer that replays samples gets the identical guarantee.
+Each row is a real `full_log` taken from the archive, not a reconstruction. One log per row is a contract: `wazuh-logtest` reads one log per line, so a multi-line sample — a stack trace, a wrapped EventChannel record, anything collected with `multi-line` — would be replayed as several unrelated logs. Runs of `CR`/`LF` inside a sample are collapsed to a single space and the ends are trimmed. Nothing else is rewritten, so tabs and spacing reach logtest exactly as a decoder would see them. `Finding.sample_log` carries the same value for API callers.
 
-History is updated only after analysis completes and stdout flushes successfully. A broken downstream pipe therefore does not mark the current archive as processed.
+### Malformed lines
 
-## Python API
+A rotated or partially written archive usually ends in one truncated line. By default such a line is skipped and counted rather than failing the archive, because failing it would discard a whole day of coverage data.
 
-The supported package-level API is:
+The count is never hidden. It appears as `Malformed lines skipped` in the report, as a `wazuhcoverage: skipped N unparseable line(s)` warning on stderr, and as `ArchiveAnalysis.malformed_lines` in the API. Skipped lines are excluded from the event total, so the percentages stay exact. Blank lines are not data loss and are not counted. Use `--strict` when you would rather know immediately that an archive is damaged.
 
-```python
-from wazuhcoverage import (
-    DEFAULT_ALERT_THRESHOLD,
-    ArchiveAnalysis,
-    Finding,
-    LogTypeCount,
-    StatusCount,
-    analyze_archive,
-)
-```
-
-`analyze_archive()` accepts either `str` or `pathlib.Path` and returns an `ArchiveAnalysis`. Pass `skip_malformed=False` for the fail-fast behaviour that `--strict` selects. Grouping is not parameterized: every call mines templates, so two analyses of the same archive are always comparable. CLI concerns such as glob expansion, `history.db`, report rendering, stdout/stderr, and exit codes are intentionally outside the analysis API.
-
-The status strings carried by `StatusCount.status`, `LogTypeCount.status` and `Finding.observed_status` are part of that API surface. Version 0.4.0 renames `no_rule` to `no_alerting_rule`, so a consumer that matched on the old string has to be updated. No alias is provided, because keeping the old name readable would keep the claim it makes readable with it; see [Classification](#classification) for why that claim was wrong.
-
-## Statistics
-
-A report opens with a header that records the archive path, the event total, and how many malformed lines were skipped. Two complementary tables follow. The first is status-based and ranks status buckets by event count. The second is log-type-based: it pivots the detailed `(status, log type)` cells into one row per log type, ranks log types by aggregate event count, and shows the four status counts side by side.
+## Reading the report
 
 ```text
 Archive: /archives/2026/09/archive.json.gz
@@ -168,75 +117,152 @@ Log type                                Events   % total  no_decoder  no_alertin
 sshd                                         4    50.00%           0                 1                1                      2
 /var/log/app.log                             3    37.50%           3                 0                0                      0
 windows                                      1    12.50%           0                 1                0                      0
+
+Findings: 2
+
+Note: a no_alerting_rule event carries no rule in the archive. Wazuh writes that
+      same record whether no rule matched, the matching rule was level 0, or a
+      rule's ignore window suppressed the match. Replay the sample through
+      wazuh-logtest to tell those apart.
+
+[1] no_decoder | /var/log/app.log
+    Events: 3
+    Affected agents: 2
+    First seen: 2026-09-18 10:00:00+00
+    Last seen: 2026-09-18 10:04:12+00
+    Decoder: -
+    Rule: -
+    Level: -
+    Pattern: app transaction <*> failed
+    Sample: app transaction 12345 failed
+
+[2] below_threshold | -
+    Events: 1
+    Affected agents: 1
+    First seen: 2026-09-18 10:02:30+00
+    Last seen: 2026-09-18 10:02:30+00
+    Decoder: -
+    Rule: 5715
+    Level: 2
+    Pattern: rule:5715
+    Sample: Sep 18 10:02:30 host sshd[2201]: Accepted publickey for ops from 10.0.0.9 port 51022 ssh2
 ```
 
-`% total` is the share of `total_events`, which excludes malformed lines. The four status columns in the log-type table are event counts, and together they equal `Events` for that row. This lets the report answer both which log types dominate the archive and how each log type is classified without repeating a status-first breakdown.
+The **Status** table tells you how much of the archive the ruleset acted on. The **Log types** table tells you where the gaps live: it ranks each decoder or source by volume and breaks it down across the same four buckets, so a row's four counts add up to its `Events`. Every bucket is listed even at zero, because an empty bucket is a coverage statement rather than missing data.
 
-`ArchiveAnalysis.log_type_counts` remains the detailed API representation with one record per `(status, log type)` pair. `LogTypeCount.percentage` is the pair's share of the whole archive and `LogTypeCount.status_percentage` is its share of that status bucket. The CLI pivots those records only while rendering, so the analysis model and public API do not change.
+`% total` is the share of `Total events`, which excludes malformed lines. Log types are ranked by volume, ties broken by name, and equal status counts keep the declared bucket order, so two runs over the same archive render identically.
 
-Every status is listed even when its count is zero, because an empty bucket is a coverage statement rather than missing data. Equal status counts keep the declared bucket order (`no_decoder`, `no_alerting_rule`, `below_threshold`, `at_or_above_threshold`). Log types are ordered by aggregate event count descending, with the log-type label breaking ties deterministically.
+Each **finding** is one group of uncovered events with a representative line. `Pattern` is the shape the group was mined down to, with `<*>` where values varied; `Sample` is a real line from the archive, ready to replay. `Affected agents` is how many distinct agents contributed, which separates a single noisy host from a fleet-wide gap. Nothing is ever truncated or wrapped — a long log type or sample widens its row instead — and the output is plain ASCII with no colour codes, so it survives redirection and a Windows code page.
 
 ## Classification
 
-Every archive event is placed in exactly one bucket:
+Every event lands in exactly one bucket, and the counts add up to the event total.
 
-- `no_decoder`: no named Wazuh decoder is represented in the archive event.
-- `no_alerting_rule`: a decoder is present but no rule is represented.
-- `below_threshold`: a rule is represented but its level is below the alert threshold, or its level is missing/unparseable and therefore cannot be proven to meet the threshold.
-- `at_or_above_threshold`: a rule is represented with a usable level at or above the threshold.
+| Bucket | Meaning | Typical action |
+| --- | --- | --- |
+| `no_decoder` | Nothing decoded the event. | Write or fix a decoder; check the log format reaching the agent. |
+| `no_alerting_rule` | It decoded, but the archive records no rule. | Replay the sample; see below. |
+| `below_threshold` | A rule fired below the alert threshold. | Decide whether that rule should be raised, or accept it as tuned. |
+| `at_or_above_threshold` | A rule fired at or above the threshold. | Covered. |
 
-These buckets are mutually exclusive and their event counts sum to `total_events`.
+The CLI uses an alert threshold of 3. The library takes an `alert_threshold` argument if your `<log_alert_level>` differs. A rule with a missing or unparseable level counts as `below_threshold`, because it cannot be shown to meet the threshold.
 
-The CLI currently uses an alert threshold of 3. The library accepts an alternate `alert_threshold` value so configuration discovery can be added later without changing the analysis model.
+### Reading a `no_alerting_rule` finding
 
-### What an absent rule does and does not prove
+This is the bucket that needs care, and the report says so next to the findings. Wazuh writes the same rule-less archive record in three different situations: no rule matched at all, a rule matched but sits at level 0, or a rule matched and its `ignore` window suppressed the event. The archive keeps no field that separates them, so this tool cannot either.
 
-The bucket is called `no_alerting_rule` rather than `no_rule` because the archive cannot support the stronger claim, and the difference is the one an operator is most likely to be caught by. An archived event that carries no rule looks like a decoder chain that ran out of rules to try, and it may well be that; it may equally be an event that matched a rule perfectly well and was then discarded because that rule sits at level 0, which is how Wazuh expresses "recognised, not worth alerting on".
+That matters because the three mean different things. A level-0 base rule such as `61100`, catching Windows System events no child rule claimed, is a real coverage gap. A local level-0 rule written to silence a known-noisy source is a decision someone already made deliberately. Both appear here with an empty `Rule` and `Level`.
 
-The cause is in `analysisd`, and it is a matter of ordering rather than of omission. In `src/analysisd/analysisd.c` the rule-matching loop breaks out on `t_currently_rule->level == 0` several statements before it reaches `lf->generated_rule = t_currently_rule`, and it sets that same pointer back to `NULL` when a rule's `ignore` window suppresses a repeated event. The archive record is queued to the writer thread in every one of those cases, but `Eventinfo_to_jsonstr` in `src/analysisd/format/to_json.c` builds the `rule` object only under `if (lf->generated_rule)`. A level-0 match, a suppressed match and a genuine non-match therefore all reach `archives.json` as the same rule-less record, and nothing else in that record distinguishes them. The behaviour was read from Wazuh v4.12.0 and has been stable across the 4.x line.
+Replaying the sample settles it:
 
-What follows is a limit on the data, not a defect this tool can repair. Reading a sample of such an event back through `wazuh-logtest` is the only way to settle which case it is, and the answer is worth having: a base rule such as `61100`, which catches Windows System informational events that no child rule claimed, marks a genuine gap in coverage, whereas a local level-0 rule written to silence a known-noisy source marks a decision someone already made. Both currently sit in the same bucket and look identical in the report, so the report says as much next to the findings instead of letting the empty `Rule` and `Level` fields imply otherwise.
+```console
+$ wazuh-logtest
+...
+**Phase 3: Completed filtering (rules).
+        id: '61100'
+        level: '0'
+        description: 'Windows System informational event'
+```
 
-The replay loop is already the documented workflow: `wazuhcoverage --no-stats ... | wazuh-logtest` emits one sample per finding, and a finding whose replay resolves to a rule at level 0 is silenced rather than undetected. Automating the classification of those replays is deliberately out of scope here, as the [Scope](#scope) section explains; it belongs to a caller that composes this library with a logtest driver.
+A replay that resolves to a level-0 rule means silenced, not undetected. A replay that reaches no rule means genuinely uncovered. If a level-0 rule dominates one of your log types and you control its child chain, `<rule id="61100" level="1" overwrite="yes">` restores rule information to the archive and collapses those events into a single `below_threshold` finding — at the cost of making the event an alert internally, which changes fired counters and what correlation rules keyed on that rule see. The mechanism behind all of this is in the [design notes](https://github.com/zbalkan/wazuhcoverage/blob/master/docs/design-notes.md#why-a-level-0-match-looks-like-no-rule).
 
-One environment-side remedy is worth naming, with its cost stated. Overriding a level-0 rule to level 1, with `<rule id="61100" level="1" overwrite="yes">`, restores rule information to the archive and moves those events into `below_threshold`, where they group by rule ID and cost one finding instead of one per message shape. It is not free: the override makes the event an alert internally, so it increments the rule's fired counters and it changes what correlation rules keyed on that rule see through `if_matched_sid` and the last-events list. Apply it to rules whose child chain you control, and verify with `wazuh-logtest` afterwards rather than assuming.
+## How findings are grouped
 
-## Finding grouping
+Findings exist so that ten thousand uncovered events become a list you can work through, not a list you scroll past.
 
-`below_threshold` events are grouped by rule ID because the rule is already the semantic grouping. Such findings deliberately do not claim one arbitrary log type even when that rule appears across several decoders or sources; log-type population statistics remain available separately in `ArchiveAnalysis.log_type_counts`.
+`below_threshold` events group by rule ID, because the rule is already the semantic grouping. Such a finding deliberately claims no single log type, since one rule can fire across several decoders; use the Log types table for that breakdown.
 
-`no_decoder` and `no_alerting_rule` events are grouped by log type and a mined message template. Grouping runs in two stages. A regex normalizer masks syntactic variance first: common timestamp prefixes, UUIDs, long hexadecimal values, and decimal numbers with five or more digits. Drain then mines a template from the masked messages, which collapses the categorical variance no regex can reach without enumerating it — usernames, hostnames, file paths, commands, URL routes. Tokens that stay constant across a family survive both stages, so a port, an event ID, or an HTTP status code that never varies remains readable in the pattern; only positions that actually vary become `<*>`.
+`no_decoder` and `no_alerting_rule` events have no rule to group by, so they group by log type and by a mined message template. A regex pass first masks timestamps, UUIDs, long hexadecimal values, and long numbers; drain3 then mines a template that also collapses the categorical variation no regex can reach — usernames, hostnames, paths, commands, URL routes. Tokens that stay constant across a family survive both passes, so a port, an event ID, or an HTTP status code that never varies stays readable in the pattern, and only positions that actually vary become `<*>`.
 
-Mining is the only grouping engine. There is no flag to disable it, because masking alone leaves a high-entropy archive with nearly as many findings as it has events: on the labelled corpus in `tools/tune_drain.py`, 6,400 events across sixteen log families reduce to 5,352 distinct masked messages, and mining turns those into 25 templates.
+Grouping is not configurable and the result is deterministic: the same archive always produces the same findings in the same order. Mined state lives in memory for the duration of one archive and is never written to disk. The tuning behind the miner, and the trade-off it accepts, are in the [design notes](https://github.com/zbalkan/wazuhcoverage/blob/master/docs/design-notes.md#template-mining).
 
-DuckDB performs the scan, the deduplication, the join and the counting; Drain only sees the distinct masked strings, so the added cost scales with an archive's vocabulary rather than with its event count. Distinct messages are fed in sorted order and findings are keyed on the template text rather than on drain3's arrival-ordered `cluster_id`, so a given archive always yields the same findings. `below_threshold` grouping is untouched, because a rule ID is already the semantic grouping.
+## Python API
 
-### Drain configuration
+```python
+from wazuhcoverage import (
+    DEFAULT_ALERT_THRESHOLD,
+    ArchiveAnalysis,
+    Finding,
+    LogTypeCount,
+    StatusCount,
+    analyze_archive,
+)
 
-The Drain parameters are set in `wazuhcoverage.analysis` and differ from the drain3 defaults, which are not safe for this use.
+analysis = analyze_archive("/archives/2026/09/archive.json.gz", alert_threshold=3)
 
-| Parameter | Value | drain3 default | Reason |
-| --- | --- | --- | --- |
-| `sim_th` | 0.56 | 0.4 | The default merges log families a coverage report must separate. |
-| `depth` | 4 | 4 | Unchanged; 3 measured identically and 5 only fragmented further. |
-| `max_clusters` | 50,000 | unbounded | Bounds mining time and memory on input that defeats grouping. |
-| `parametrize_numeric_tokens` | `true` | `true` | Unchanged; disabling it multiplied templates without preventing a merge. |
+print(analysis.total_events, analysis.malformed_lines)
 
-The similarity threshold is the consequential one, and both directions fail loudly. At the drain3 default of 0.4, the corpus merges Windows `4624` with `4625` — a successful logon reported together with a failed one — and firewall `ACCEPT` with `DROP`. Above 0.57 the count jumps from 25 templates to 93 as families whose variable tokens are paths or hostnames shatter into one finding per value. Across three corpus seeds, 0.56 and 0.57 were the only values with neither defect, so 0.56 is taken with margin on both sides. Two tests in `tests/test_template_mining.py` guard that band: one fails if opposite outcomes of a family merge, the other if a high-cardinality family fragments.
+for status in analysis.status_counts:
+    print(f"{status.status:<24} {status.event_count:>8} {status.percentage:6.2f}%")
 
-Mining cost tracks an archive's vocabulary, not its event count, and it degrades sharply only when messages share no structure at all, because every message then becomes its own cluster. Measured on such input, 60,000 distinct shapes took 103 seconds and 120,000 took 1,373 seconds, which is why the cluster count is capped: the same 120,000 shapes took 449 seconds under a tighter cap of 20,000. A real archive does not approach this, since its messages group; an archive that reaches the cap carries more distinct shapes than a coverage report could be read from.
+for finding in analysis.findings:
+    if finding.observed_status == "no_alerting_rule":
+        print(finding.log_type, finding.event_count, finding.sample_log)
+```
 
-The trade-off that remains is real. Drain merges by positional shape, so messages that share a shape but differ in meaning can still land in one finding, and `message_pattern` reports `<*>` where a username or path was. The tuning reduces that risk on the families measured; it does not eliminate it for shapes the corpus does not cover. `sample_log` is unaffected and stays source-derived, so every finding still carries a real line to replay. Mined state is per archive and never written to disk, so `history.db` remains the only persistent state, and templates are re-derived per archive rather than accumulated across them.
+`analyze_archive(path, *, alert_threshold=3, skip_malformed=True)` takes a `str` or `pathlib.Path`, expands `~`, and returns an `ArchiveAnalysis`. It raises `FileNotFoundError` for a missing path and `ValueError` for a negative threshold. Pass `skip_malformed=False` for the fail-fast behaviour `--strict` selects. Grouping is not parameterized, so two analyses of the same archive are always comparable.
 
-Malformed NDJSON is skipped rather than ignored. The distinction matters because ignoring it would corrupt the coverage denominator: DuckDB does not drop an unparseable line when errors are tolerated, it yields a NULL document, which would extract as an event with no decoder and inflate both `total_events` and the `no_decoder` bucket. Such lines are therefore excluded from every bucket and reported separately as `malformed_lines`, so the buckets still sum exactly to `total_events`. Lines that parse but are not objects — a bare scalar, array, or `null` — are rejected by strict mode too and are accounted for the same way; blank and whitespace-only lines are not data loss and are not counted.
+| Model | Fields |
+| --- | --- |
+| `ArchiveAnalysis` | `path`, `total_events`, `malformed_lines`, `status_counts`, `log_type_counts`, `findings` |
+| `StatusCount` | `status`, `event_count`, `percentage` |
+| `LogTypeCount` | `status`, `log_type`, `event_count`, `percentage`, `status_percentage` |
+| `Finding` | `finding_key`, `observed_status`, `log_type`, `message_pattern`, `event_count`, `affected_agents`, `first_seen`, `last_seen`, `observed_decoder`, `observed_rule_id`, `observed_rule_level`, `sample_log` |
 
-Compressed `.json.gz` and uncompressed NDJSON archives are both supported directly by DuckDB.
+All models are frozen dataclasses and every collection is a tuple, so a result can be cached or shared without defensive copying. `LogTypeCount.percentage` is the pair's share of the whole archive; `status_percentage` is its share of that one bucket, which ranks a log type inside a small bucket that a whole-archive percentage would flatten to nothing. The package is `py.typed`, and annotations resolve under `typing.get_type_hints()` on every supported interpreter.
 
-## Scope
+Glob expansion, `history.db`, report rendering, stdout and stderr, and exit codes are CLI concerns and are deliberately outside the analysis API.
 
-`wazuhcoverage` owns archive coverage analysis. It does not depend on `wazuhtester` and does not run Wazuh logtest internally. A higher-level toolkit can compose the libraries directly, for example by analyzing an archive with `wazuhcoverage` and replaying selected samples with `wazuhtester`.
+### Compatibility
 
-`history.db` remains only a processed-path cache. It is not intended to become an analytics database. Malformed, legacy-pickle, or structurally invalid history files are never deserialized. Because history is only a disposable processed-path cache, the tool replaces such files atomically with an empty JSON history and continues.
+The status strings carried by `StatusCount.status`, `LogTypeCount.status`, and `Finding.observed_status` are part of the API surface. Version 0.4.0 renamed `no_rule` to `no_alerting_rule`; a consumer matching on the old string must be updated. No alias is provided, because the old name asserted something an archive cannot show.
+
+## Limitations
+
+The tool reads archives and nothing else, which is what makes it safe to run offline, and also what bounds it. It cannot distinguish an unmatched event from a level-0 or suppressed one, as described above. It reports what Wazuh recorded, so an archive written by a manager whose ruleset has since changed describes that older ruleset.
+
+Grouping merges by positional shape, so messages that share a shape but differ in meaning can land in one finding, and a pattern shows `<*>` where a username or path was. The tuning reduces that on the log families it was measured against; it does not eliminate it for shapes that corpus does not cover. Samples are unaffected, so every finding still carries a real line to check.
+
+`wazuhcoverage` does not run logtest for you and does not depend on `wazuhtester`. Composing the two — analyze here, replay there — is a caller's job, and keeping that boundary is why this package stays installable anywhere a Python interpreter runs.
+
+## Development
+
+```bash
+python -m pip install -e ".[dev]"
+python -m pytest
+python -m ruff check .
+python -m ruff format --check .
+```
+
+`tools/tune_drain.py` rebuilds the labelled corpus the miner's parameters were selected against and prints the grid. Re-run it after changing the normalizer, the corpus, or the drain3 version:
+
+```bash
+python tools/tune_drain.py
+```
+
+`tools/check_dependency_pins.py` walks the installed dependency graph and fails when an exact version pin appears or disappears. CI runs it on every supported interpreter alongside `pip check`, so a new dependency that narrows what this package can coexist with fails review rather than a user's install.
+
+Design rationale, measurements, and the upstream Wazuh behaviour this tool has to work around live in [docs/design-notes.md](https://github.com/zbalkan/wazuhcoverage/blob/master/docs/design-notes.md).
 
 ## License
 
