@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import xml.etree.ElementTree as ET
+import re
 from pathlib import Path
 from typing import Optional, Union
 
@@ -10,26 +10,32 @@ DEFAULT_OSSEC_CONF = Path("/var/ossec/etc/ossec.conf")
 MIN_ALERT_THRESHOLD = 1
 MAX_ALERT_THRESHOLD = 16
 
+_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
+_LOG_ALERT_LEVEL_RE = re.compile(
+    r"<log_alert_level>\s*([^<]*?)\s*</log_alert_level>"
+)
+
 
 def read_alert_threshold(path: Union[str, Path] = DEFAULT_OSSEC_CONF) -> Optional[int]:
     """Return log_alert_level from ossec.conf, or None when it is not set.
 
-    File access, malformed XML, and invalid values are reported to the caller
-    rather than silently converted to the Wazuh default. The CLI decides when
-    falling back to that default is appropriate.
+    Wazuh configuration is XML-like rather than a single strict XML document,
+    so extract only the scalar setting needed here. File access and invalid
+    values are reported to the caller rather than silently converted to the
+    Wazuh default. The CLI decides when falling back to that default is
+    appropriate.
     """
 
     config_path = Path(path)
-    try:
-        root = ET.parse(config_path).getroot()
-    except ET.ParseError as exc:
-        raise ValueError(f"{config_path} is not valid XML: {exc}") from exc
-    element = root.find("./alerts/log_alert_level")
-    if element is None or element.text is None or not element.text.strip():
+    text = config_path.read_text(encoding="utf-8")
+    text = _COMMENT_RE.sub("", text)
+
+    match = _LOG_ALERT_LEVEL_RE.search(text)
+    if match is None:
         return None
 
     try:
-        value = int(element.text.strip())
+        value = int(match.group(1).strip())
     except ValueError as exc:
         raise ValueError("log_alert_level must be an integer") from exc
 
