@@ -9,9 +9,8 @@ from wazuhcoverage import ArchiveAnalysis, Finding, cli
 
 
 def test_cli_flags_and_targets() -> None:
-    args = cli.build_parser().parse_args(["--logtest", "--no-stats", "/archives/**/*.json.gz", "/other/a.json.gz"])
+    args = cli.build_parser().parse_args(["--no-stats", "/archives/**/*.json.gz", "/other/a.json.gz"])
 
-    assert args.logtest is True
     assert args.no_stats is True
     assert args.strict is False
     assert args.targets == ["/archives/**/*.json.gz", "/other/a.json.gz"]
@@ -41,10 +40,10 @@ def test_version_needs_no_target() -> None:
 def test_short_flags_mirror_the_long_ones() -> None:
     parser = cli.build_parser()
 
-    short = parser.parse_args(["-n", "-s", "-l", "a.json"])
-    long = parser.parse_args(["--no-stats", "--strict", "--logtest", "a.json"])
+    short = parser.parse_args(["-n", "-s", "a.json"])
+    long = parser.parse_args(["--no-stats", "--strict", "a.json"])
 
-    assert (short.no_stats, short.strict, short.logtest) == (True, True, True)
+    assert (short.no_stats, short.strict) == (True, True)
     assert vars(short) == vars(long)
 
 
@@ -54,9 +53,9 @@ def test_short_flags_combine_in_any_order() -> None:
     # grew a value or a second character would silently break "-ins" in a cron
     # entry that already uses it.
     parser = cli.build_parser()
-    expected = vars(parser.parse_args(["-n", "-s", "-l", "a.json"]))
+    expected = vars(parser.parse_args(["-n", "-s", "a.json"]))
 
-    for cluster in ("-nsl", "-lsn", "-sln"):
+    for cluster in ("-ns", "-sn"):
         assert vars(parser.parse_args([cluster, "a.json"])) == expected
 
     # A cluster still has to be wholly valid.
@@ -67,8 +66,8 @@ def test_short_flags_combine_in_any_order() -> None:
 def test_flags_are_accepted_before_or_after_the_targets() -> None:
     parser = cli.build_parser()
 
-    leading = parser.parse_args(["-nsl", "/archives/a.json", "/archives/b.json"])
-    trailing = parser.parse_args(["/archives/a.json", "/archives/b.json", "-nsl"])
+    leading = parser.parse_args(["-ns", "/archives/a.json", "/archives/b.json"])
+    trailing = parser.parse_args(["/archives/a.json", "/archives/b.json", "-ns"])
 
     assert vars(leading) == vars(trailing)
     assert leading.targets == ["/archives/a.json", "/archives/b.json"]
@@ -93,7 +92,7 @@ class _TerminalStdin:
 
 
 def test_targets_are_optional_so_a_pipe_can_supply_one() -> None:
-    assert cli.build_parser().parse_args(["-snl"]).targets == []
+    assert cli.build_parser().parse_args(["-sn"]).targets == []
 
 
 def test_a_piped_archive_is_analyzed_without_a_target(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys) -> None:
@@ -388,52 +387,24 @@ def test_no_stats_emits_exactly_one_row_per_finding(monkeypatch: pytest.MonkeyPa
     assert len(captured.out.splitlines()) == len(analysis.findings)
 
 
-def test_logtest_joins_the_short_flag_cluster() -> None:
+def test_there_is_no_flag_to_select_replay() -> None:
+    # Replay is decided by what the machine can reach, not by an argument, so
+    # a script carrying -l or --logtest must stop rather than run with a flag
+    # that means nothing.
     parser = cli.build_parser()
-
-    expected = vars(parser.parse_args(["-n", "-s", "-l", "a.json"]))
-    for cluster in ("-nsl", "-lsn", "-sl", "-nl"):
-        merged = vars(parser.parse_args([cluster, "a.json"]))
-        assert all(merged[flag] for flag in _flags_in(cluster))
-
-    assert vars(parser.parse_args(["-nsl", "a.json"])) == expected
-    assert parser.parse_args(["a.json"]).logtest is False
+    assert not hasattr(parser.parse_args(["a.json"]), "logtest")
+    for argument in ("--logtest", "-l", "--logtest-socket=/tmp/s"):
+        with pytest.raises(SystemExit):
+            parser.parse_args([argument, "a.json"])
 
 
-def _flags_in(cluster: str) -> list[str]:
-    names = {"n": "no_stats", "s": "strict", "l": "logtest"}
-    return [names[letter] for letter in cluster.lstrip("-")]
+def test_log_format_keeps_its_documented_default() -> None:
+    assert cli.build_parser().parse_args(["a.json"]).log_format == "syslog"
 
 
-def test_logtest_options_have_documented_defaults() -> None:
-    args = cli.build_parser().parse_args(["a.json"])
-
-    assert args.log_format == "syslog"
-    assert args.logtest_socket is None
-
-
-def test_an_unreachable_daemon_stops_before_any_archive_is_read(
+def test_a_reachable_daemon_is_used_without_being_asked(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys
 ) -> None:
-    # Scanning thirty archives and only then failing on a socket that was
-    # never going to answer is the expensive way to learn about a typo.
-    archive = tmp_path / "archive.json.gz"
-    archive.touch()
-
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(cli, "resolve_targets", lambda _targets: [archive])
-    monkeypatch.setattr(cli, "analyze_archive", lambda *_args, **_kwargs: pytest.fail("must not scan"))
-    monkeypatch.setattr(cli, "_check_logtest", _refuse_logtest)
-
-    assert cli.main(["--logtest", str(archive)]) == 2
-    assert "not accepting connections" in capsys.readouterr().err
-
-
-def _refuse_logtest(_socket_path) -> None:
-    raise RuntimeError("the wazuh-logtest socket at /var/ossec/queue/sockets/logtest is not accepting connections.")
-
-
-def test_logtest_options_reach_the_verifier(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys) -> None:
     archive = tmp_path / "archive.json.gz"
     archive.touch()
     received: list[dict] = []
@@ -441,24 +412,76 @@ def test_logtest_options_reach_the_verifier(monkeypatch: pytest.MonkeyPatch, tmp
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(cli, "resolve_targets", lambda _targets: [archive])
     monkeypatch.setattr(cli, "analyze_archive", lambda path, **_kwargs: _analysis(Path(path)))
-    monkeypatch.setattr(cli, "_check_logtest", lambda _socket_path: None)
+    monkeypatch.setattr(cli, "unavailable_reason", lambda: None)
     monkeypatch.setattr(cli, "verify_findings", lambda analysis, **kwargs: received.append(kwargs) or ())
     monkeypatch.setattr(cli, "render_report", lambda _analysis, _verifications=(): "report\n")
 
-    assert cli.main(["--logtest", "--log-format", "json", "--logtest-socket", "/tmp/s", str(archive)]) == 0
-    assert received == [{"alert_threshold": 3, "log_format": "json", "socket_path": "/tmp/s"}]
+    assert cli.main(["--log-format", "json", str(archive)]) == 0
+    assert received == [{"alert_threshold": 3, "log_format": "json"}]
+    assert "reporting from the archive alone" not in capsys.readouterr().err
+
+
+def test_an_unusable_daemon_warns_once_and_keeps_going(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys) -> None:
+    # The whole point of best effort: a laptop with no Wazuh on it still gets
+    # its coverage report, and is told what the report cannot answer.
+    first = tmp_path / "a.json.gz"
+    second = tmp_path / "b.json.gz"
+    first.touch()
+    second.touch()
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cli, "resolve_targets", lambda _targets: [first, second])
+    monkeypatch.setattr(cli, "analyze_archive", lambda path, **_kwargs: _analysis(Path(path)))
+    monkeypatch.setattr(cli, "unavailable_reason", lambda: "wazuhtester is not installed")
+    monkeypatch.setattr(cli, "verify_findings", lambda *_args, **_kwargs: pytest.fail("must not replay"))
+    monkeypatch.setattr(cli, "render_report", lambda _analysis, _verifications=(): "report\n")
+
+    assert cli.main([str(first), str(second)]) == 0
+
+    captured = capsys.readouterr()
+    assert captured.out == "report\nreport\n"
+    assert captured.err.count("reporting from the archive alone") == 1
+    assert "wazuhtester is not installed" in captured.err
+    assert "docs/CAVEATS.md" in captured.err
+    assert "Processed: 2 | Failed: 0" in captured.err
+
+
+def test_the_daemon_is_probed_once_not_per_archive(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys) -> None:
+    archives = [tmp_path / f"{name}.json.gz" for name in ("a", "b", "c")]
+    for archive in archives:
+        archive.touch()
+    probes: list[int] = []
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cli, "resolve_targets", lambda _targets: archives)
+    monkeypatch.setattr(cli, "analyze_archive", lambda path, **_kwargs: _analysis(Path(path)))
+    monkeypatch.setattr(cli, "unavailable_reason", lambda: probes.append(1) and None)
+    monkeypatch.setattr(cli, "verify_findings", lambda *_args, **_kwargs: ())
+    monkeypatch.setattr(cli, "render_report", lambda _analysis, _verifications=(): "report\n")
+
+    assert cli.main([str(a) for a in archives]) == 0
+    assert len(probes) == 1
     capsys.readouterr()
 
 
-def test_without_logtest_nothing_is_replayed(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys) -> None:
+def test_the_probe_happens_before_the_first_archive_is_read(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys
+) -> None:
+    # A warning printed halfway down a report is a warning nobody reads.
     archive = tmp_path / "archive.json.gz"
     archive.touch()
+    order: list[str] = []
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(cli, "resolve_targets", lambda _targets: [archive])
-    monkeypatch.setattr(cli, "analyze_archive", lambda path, **_kwargs: _analysis(Path(path)))
-    monkeypatch.setattr(cli, "_check_logtest", lambda _socket_path: pytest.fail("must not probe the daemon"))
-    monkeypatch.setattr(cli, "verify_findings", lambda *_args, **_kwargs: pytest.fail("must not replay"))
+    monkeypatch.setattr(
+        cli,
+        "analyze_archive",
+        lambda path, **_kwargs: order.append("analyze") or _analysis(Path(path)),
+    )
+    monkeypatch.setattr(cli, "unavailable_reason", lambda: order.append("probe") or "no socket")
+    monkeypatch.setattr(cli, "render_report", lambda _analysis, _verifications=(): "report\n")
 
-    assert cli.main(["--no-stats", str(archive)]) == 0
+    assert cli.main([str(archive)]) == 0
+    assert order == ["probe", "analyze"]
     capsys.readouterr()

@@ -18,7 +18,7 @@ from wazuhcoverage import __version__
 from wazuhcoverage.analysis import DEFAULT_ALERT_THRESHOLD, analyze_archive
 from wazuhcoverage.report import render_report
 from wazuhcoverage.targets import resolve_targets
-from wazuhcoverage.verification import DEFAULT_LOG_FORMAT, verify_findings
+from wazuhcoverage.verification import DEFAULT_LOG_FORMAT, unavailable_reason, verify_findings
 
 # The conventional spelling for "read the archive from standard input". It is
 # also implied when no target is given and stdin is not a terminal, which is
@@ -38,7 +38,7 @@ _GZIP_MAGIC = b"\x1f\x8b"
 
 def build_parser() -> argparse.ArgumentParser:
     # The short behaviour flags are single-character store_true options, so
-    # argparse accepts them merged into one cluster (-nsl, -lsn) as well as
+    # argparse accepts them merged into one cluster (-ns, -sn) as well as
     # separately. Keeping them single-character is what preserves that, and
     # the long forms stay the documented spelling for anything written into a
     # cron entry or a script. --log-format and --logtest-socket take values, so
@@ -70,28 +70,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="Fail an archive on the first unparseable line instead of skipping and counting it.",
     )
     parser.add_argument(
-        "-l",
-        "--logtest",
-        action="store_true",
-        help=(
-            "Replay one sample per finding through wazuh-logtest and report its effective state. "
-            "Needs the wazuhcoverage[logtest] extra and a reachable Wazuh manager."
-        ),
-    )
-    parser.add_argument(
         "--log-format",
         default=DEFAULT_LOG_FORMAT,
         metavar="FORMAT",
         help=(
             "Log format reported to wazuh-logtest when replaying, e.g. syslog or json. "
-            f"Default: {DEFAULT_LOG_FORMAT}. Only meaningful with --logtest."
+            f"Default: {DEFAULT_LOG_FORMAT}. Ignored when no manager is reachable."
         ),
-    )
-    parser.add_argument(
-        "--logtest-socket",
-        default=None,
-        metavar="PATH",
-        help="wazuh-logtest socket to replay against. Defaults to the Wazuh install location.",
     )
     parser.add_argument(
         "targets",
@@ -124,16 +109,21 @@ def main(argv: Optional[list[str]] = None) -> int:
         print("wazuhcoverage: no files matched the supplied targets", file=sys.stderr)
         return 2
 
-    # A missing library or an unreachable daemon is a configuration fault, and
-    # it is the same fault for every archive. Finding it after scanning thirty
-    # of them, or worse, printing reports whose effective column is silently
-    # absent, would be the expensive way to learn it.
-    if args.logtest:
-        try:
-            _check_logtest(args.logtest_socket)
-        except RuntimeError as exc:
-            print(f"wazuhcoverage: {exc}", file=sys.stderr)
-            return 2
+    # Replay is best effort and decided once, before any archive is read: the
+    # answer is the same for every one of them, and a reader who is told at the
+    # top that the effective column is missing will not spend the rest of the
+    # report wondering where it went.
+    reason = unavailable_reason()
+    replay = reason is None
+    if reason is not None:
+        # Two lines rather than one: the reason can be long, and the
+        # consequence is the part a reader has to act on.
+        print(f"wazuhcoverage: {reason}", file=sys.stderr)
+        print(
+            "wazuhcoverage: reporting from the archive alone, which cannot tell "
+            "an unmatched event from a silenced one; see docs/CAVEATS.md",
+            file=sys.stderr,
+        )
 
     processed = 0
     failed = 0
@@ -146,7 +136,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             with _spooled_stdin() as spooled:
                 if spooled.stat().st_size == 0:
                     print("wazuhcoverage: read 0 bytes from stdin", file=sys.stderr)
-                _report_one(spooled, STDIN_LABEL, args)
+                _report_one(spooled, STDIN_LABEL, args, replay)
         except BrokenPipeError:
             _silence_broken_stdout()
             return 1
@@ -160,7 +150,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         print(f"Processing {archive}", file=sys.stderr)
 
         try:
-            _report_one(archive, archive, args)
+            _report_one(archive, archive, args, replay)
             processed += 1
 
         except BrokenPipeError:
@@ -180,7 +170,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     return 1 if failed else 0
 
 
-def _report_one(archive: Path, label: Path, args: argparse.Namespace) -> None:
+def _report_one(archive: Path, label: Path, args: argparse.Namespace, replay: bool) -> None:
     """Analyze one archive and write its output, raising on failure.
 
     ``label`` is what the reader should see. It differs from ``archive`` only
@@ -194,12 +184,11 @@ def _report_one(archive: Path, label: Path, args: argparse.Namespace) -> None:
     )
 
     verifications = ()
-    if args.logtest:
+    if replay:
         verifications = verify_findings(
             analysis,
             alert_threshold=DEFAULT_ALERT_THRESHOLD,
             log_format=args.log_format,
-            socket_path=args.logtest_socket,
         )
 
     # Surface the loss on stderr too: with --no-stats the report that carries
@@ -221,26 +210,6 @@ def _report_one(archive: Path, label: Path, args: argparse.Namespace) -> None:
     # A successful flush is part of successful processing. This matters when
     # stdout is a pipe and the downstream consumer exits early.
     sys.stdout.flush()
-
-
-def _check_logtest(socket_path: Optional[str]) -> None:
-    """Fail unless wazuh-logtest can actually be reached.
-
-    verify_findings performs the same check per archive. Doing it once up
-    front turns a per-archive failure into a refusal to start, which is what
-    a configuration fault deserves.
-    """
-
-    from wazuhcoverage.verification import _load_wazuhtester
-
-    wazuhtester = _load_wazuhtester()
-    if not wazuhtester.is_logtest_available(socket_path):
-        where = socket_path or wazuhtester.get_socket_path()
-        raise RuntimeError(
-            f"the wazuh-logtest socket at {where} is not accepting connections. "
-            "Check that the Wazuh manager is running and that this user may read the socket, "
-            "or set WAZUH_LOGTEST_SOCKET."
-        )
 
 
 def _stdin_is_a_terminal() -> bool:

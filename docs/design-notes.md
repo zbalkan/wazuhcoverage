@@ -2,19 +2,13 @@
 
 Rationale behind decisions that the [README](../README.md) states as behaviour. Nothing here is needed to use the tool; it exists so that a change to any of it is made deliberately, with the measurement or the upstream constraint in view.
 
-## Why a level-0 match looks like no rule
+## Why the ambiguous bucket is named as it is
 
-An archived event that Wazuh resolved to a level-0 rule carries no rule at all in `archives.json`. It is indistinguishable from an event no rule matched, which is why the bucket is called `no_alerting_rule` rather than `no_rule`.
+Wazuh's analysisd drops the matched rule from an archived event when that rule sits at level 0, and again when a rule's `ignore` window suppresses the event. The mechanism, with source references, is in [docs/CAVEATS.md](https://github.com/zbalkan/wazuhcoverage/blob/master/docs/CAVEATS.md); what follows is what this project does about it.
 
-The cause is in `analysisd`, and it is a matter of ordering rather than omission. In `src/analysisd/analysisd.c` the rule-matching loop breaks out on `t_currently_rule->level == 0` several statements before it reaches `lf->generated_rule = t_currently_rule`, and it sets that same pointer back to `NULL` when a rule's `ignore` window suppresses a repeated event. The archive record is queued to the writer thread in every one of those cases, but `Eventinfo_to_jsonstr` in `src/analysisd/format/to_json.c` builds the `rule` object only under `if (lf->generated_rule)`.
+The bucket is named for what the record proves — no alerting rule was attached — rather than for the stronger claim that no rule was evaluated. `no_rule`, the obvious name, is the one it must not have: a reader acts on that name, and acting on it means writing a rule for an event a level-0 rule already recognises.
 
-A level-0 match, a suppressed match, and a genuine non-match therefore all reach `archives.json` as the same rule-less record, and nothing else in that record separates them. The behaviour was read from Wazuh v4.12.0 and has been stable across the 4.x line; re-check it before relying on this wording against a later major version.
-
-The data cannot be repaired after the fact, but it can be asked again. `wazuh-logtest` is a testing interface rather than the alert pipeline: it reports the rule it matched whatever that rule's level is, so a replay recovers the distinction analysisd discarded. That is what `verify_findings()` and `--logtest` do, and the next section covers what they can and cannot answer.
-
-For a report without a manager, three consequences follow, and all three are deliberate:
-
-The bucket is named for what the record proves — no alerting rule was attached — rather than for the stronger claim that no rule was evaluated. `no_rule`, the obvious name, is the one it must not have: a reader acts on that name, and acting on it means writing a rule for an event a level-0 rule already recognises. The report prints a note beside the findings whenever the bucket holds events, because an empty `Rule` and `Level` otherwise imply the stronger claim on their own.
+When no replay is possible the report prints a note beside the findings, because an empty `Rule` and `Level` otherwise imply the stronger claim on their own. When a replay is possible the note is dropped, since the `Effective` line has answered the question the note exists to raise.
 
 `tests/test_analysis_integration.py` pins both the bucket name and the classification of a real archived EventChannel event that logtest resolves to rule `61100` at level 0.
 
@@ -28,15 +22,11 @@ The unit of replay is the finding, not the event. That is what grouping bought: 
 
 ### A session per sample
 
-`wazuhtester` offers `send_multiple_logs()`, which shares one daemon session so that frequency and composite rules can fire. That is the wrong primitive here. The samples in a coverage report are unrelated messages from different log families; sharing a session would let four superficially similar samples prime a frequency rule so the fifth reports a match that production would never produce. Reporting coverage that does not exist is worse than reporting none, so each sample is replayed through `send_log()` without a token, which creates and removes a session of its own.
-
-The cost is the opposite blind spot, and it is stated in the README rather than hidden: a rule that only fires on the Nth event cannot be reproduced from one event, so a finding covered solely by such a rule replays as `uncovered`. Both errors were available; the one that under-reports coverage is the one that sends someone to look at a rule, and the one that over-reports it is the one that closes a real gap.
+`wazuhtester` offers `send_multiple_logs()`, which shares one daemon session so that frequency and composite rules can fire. That is the wrong primitive here: the samples in a coverage report are unrelated messages from different log families, and a shared session would let them prime each other. Each sample therefore goes through `send_log()` without a token, which creates and removes a session of its own. The blind spot that buys, and why that trade was taken, is in [docs/CAVEATS.md](https://github.com/zbalkan/wazuhcoverage/blob/master/docs/CAVEATS.md#logtest-sees-one-event-so-frequency-rules-never-fire).
 
 ### Location, and what could not be derived
 
-The decoder chain consults `location`, which is why pasting a raw EventChannel record into `wazuh-logtest` by hand resolves it to the JSON decoder rather than `windows_eventchannel`. `Finding` therefore carries `observed_location`, taken from the archive with `any_value()` over the group, and the replay reports it. A finding spanning several locations reports one of them, the same compromise already made for the decoder.
-
-`log_format` could not be handled the same way, because the archive does not record it. It is a parameter with wazuh-logtest's own `syslog` default, and the README says plainly that a JSON or EventChannel source needs the right value passed or its answer is wrong. Deriving it from the decoder name was considered and rejected: the mapping is Wazuh's, not this package's, and a wrong guess would be indistinguishable from a real result.
+`Finding` carries `observed_location`, taken from the archive with `any_value()` over the group, because the decoder chain consults it. `log_format` could not be handled the same way, since the archive does not record it; it is a parameter with wazuh-logtest's own `syslog` default. Both are covered in [docs/CAVEATS.md](https://github.com/zbalkan/wazuhcoverage/blob/master/docs/CAVEATS.md#location-decides-the-decoder-and-a-pasted-log-has-none).
 
 ### Failure is never a gap
 
@@ -44,9 +34,13 @@ A replay that does not produce a usable answer is `unverified`, and `unverified`
 
 Configuration faults are separated from results. A missing `wazuhtester` or a socket that refuses connections is the same fault for every archive, so the CLI probes once before scanning anything and exits `2`. Discovering it after thirty archives, or printing reports whose effective column is silently absent, would be the expensive way to learn about a typo.
 
-### What a replay is actually answering
+### Best effort, decided once
 
-The manager replayed against is the one running now. Its ruleset may not be the ruleset that wrote the archive, so a replay of last year's archive answers "would we catch this today". That is usually the more useful question and it is not the same question, which is why the archive's own `Rule` and `Level` fields stay in the report next to the `Effective` line rather than being overwritten by it.
+The CLI probes for a usable daemon once, before the first archive is read, and reports from the archive alone when there is none. Deciding per archive would be the same answer computed repeatedly; deciding lazily, at the first finding, would bury the warning in the middle of a report whose effective column had silently gone missing.
+
+`verify_findings()` does not adopt that policy. A caller that asked for a replay is owed the reason it could not happen, so the library raises and `unavailable_reason()` exists for callers that would rather carry on. Policy lives in the CLI; the library states facts.
+
+The archive's own `Rule` and `Level` stay in the report beside the `Effective` line rather than being overwritten by it, because a replay answers for the manager running now rather than the one that wrote the archive.
 
 ## Template mining
 

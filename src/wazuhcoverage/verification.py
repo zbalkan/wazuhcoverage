@@ -12,8 +12,14 @@ bucket into an answer, at the cost of needing a reachable Wazuh manager.
 
 This module is the only part of wazuhcoverage that talks to anything outside
 the archive file. ``analyze_archive`` stays offline and unchanged; verification
-is a separate call a caller opts into, and ``wazuhtester`` is an optional
-dependency so the package still installs where no manager exists.
+is a separate call, and ``wazuhtester`` is an optional dependency so the
+package still installs where no manager exists.
+
+Two callers with different needs are served deliberately differently.
+``verify_findings`` is explicit: asked to replay, it raises rather than quietly
+returning less than it promised. ``unavailable_reason`` answers the question a
+best-effort caller has instead -- can this machine replay at all -- so the CLI
+can say why it cannot and carry on reading the archive.
 """
 
 from __future__ import annotations
@@ -38,18 +44,60 @@ DEFAULT_LOG_FORMAT = "syslog"
 DEFAULT_LOCATION = "stdin"
 
 
+# What this package calls on wazuhtester. Checked after import because the name
+# importing is not the same as the library being there: a half-removed install
+# leaves an empty directory that Python happily imports as a namespace package,
+# and so does any directory called wazuhtester that happens to be on the path.
+_REQUIRED_ATTRIBUTES = ("is_logtest_available", "get_socket_path", "send_log")
+
+
 def _load_wazuhtester() -> Any:
     try:
         import wazuhtester
-    except ImportError as exc:  # pragma: no cover - installation error path
+    except ImportError as exc:
         raise RuntimeError(
-            "wazuhtester is required to verify findings. "
+            "wazuhtester is not installed, so findings cannot be replayed. "
             "Install it with: pip install 'wazuhcoverage[logtest]' "
-            "(Linux, Python 3.10 or newer, with a running Wazuh manager)."
+            "(Linux, Python 3.10 or newer, with a running Wazuh manager)"
         ) from exc
-    except RuntimeError as exc:  # pragma: no cover - non-Linux platform guard
-        raise RuntimeError(f"wazuhtester cannot run here: {exc}") from exc
+    except RuntimeError as exc:
+        # wazuhtester refuses to import off Linux, where the logtest socket
+        # cannot exist. That is a fact about the machine, not a fault.
+        raise RuntimeError(f"wazuhtester cannot run on this platform: {exc}") from exc
+
+    missing = [name for name in _REQUIRED_ATTRIBUTES if not hasattr(wazuhtester, name)]
+    if missing:
+        where = getattr(wazuhtester, "__file__", None) or "a namespace package with no module file"
+        raise RuntimeError(
+            f"the wazuhtester importable from {where} is missing {', '.join(missing)}, "
+            "so it is not a usable install. Reinstall it with: "
+            "pip install --force-reinstall 'wazuhcoverage[logtest]'"
+        )
+
     return wazuhtester
+
+
+def unavailable_reason(socket_path: Optional[str] = None) -> Optional[str]:
+    """Return None when replay is possible here, or a short reason why not.
+
+    Three things can stop a replay, and a caller that means to continue without
+    one needs to tell a user which: the library is not installed, the platform
+    cannot run it, or the daemon is not answering. None of them is an error in
+    the archive, so none of them raises.
+    """
+
+    try:
+        wazuhtester = _load_wazuhtester()
+        if not wazuhtester.is_logtest_available(socket_path):
+            where = socket_path or wazuhtester.get_socket_path()
+            return f"the wazuh-logtest socket at {where} is not answering"
+    except Exception as exc:  # noqa: BLE001 - a probe that raises defeats its own purpose
+        # Anything at all: a broken install, a permission error reaching the
+        # socket, a wazuhtester whose interface has moved. The caller wants a
+        # sentence to print and a report to carry on writing.
+        return f"{type(exc).__name__}: {exc}" if not isinstance(exc, RuntimeError) else str(exc)
+
+    return None
 
 
 def verify_findings(
@@ -75,8 +123,10 @@ def verify_findings(
     replays as ``uncovered``.
 
     Raises ``RuntimeError`` when wazuhtester is missing or the logtest socket
-    does not accept connections, because both are configuration faults rather
-    than results. A failure on one sample is a result: that finding comes back
+    is not answering, because a caller that asked for a replay is owed the
+    reason rather than a silently emptier answer; ``unavailable_reason`` is
+    there for callers that would rather continue without one. A failure on a
+    single sample is a result, not a fault: that finding comes back
     ``unverified`` with the error text, and the remaining samples still run.
     """
 
@@ -89,15 +139,11 @@ def verify_findings(
     if not targets:
         return ()
 
-    wazuhtester = _load_wazuhtester()
+    reason = unavailable_reason(socket_path)
+    if reason is not None:
+        raise RuntimeError(reason)
 
-    if not wazuhtester.is_logtest_available(socket_path):
-        where = socket_path or wazuhtester.get_socket_path()
-        raise RuntimeError(
-            f"the wazuh-logtest socket at {where} is not accepting connections. "
-            "Check that the Wazuh manager is running and that this user may read the socket, "
-            "or set WAZUH_LOGTEST_SOCKET."
-        )
+    wazuhtester = _load_wazuhtester()
 
     return tuple(
         _verify_one(

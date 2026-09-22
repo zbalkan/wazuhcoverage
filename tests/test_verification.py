@@ -231,7 +231,7 @@ def test_one_round_trip_per_finding_not_per_event(monkeypatch: pytest.MonkeyPatc
 def test_an_unreachable_daemon_is_refused_not_reported_as_a_gap(monkeypatch: pytest.MonkeyPatch) -> None:
     _install(monkeypatch, _FakeTester(_response("NoRule"), available=False))
 
-    with pytest.raises(RuntimeError, match="not accepting connections"):
+    with pytest.raises(RuntimeError, match="not answering"):
         verify_findings(_analysis(_finding("k")))
 
 
@@ -265,3 +265,59 @@ def test_a_missing_library_names_the_extra(monkeypatch: pytest.MonkeyPatch) -> N
 
     with pytest.raises(RuntimeError, match=r"wazuhcoverage\[logtest\]"):
         verify_findings(_analysis(_finding("k")))
+
+
+def test_the_probe_is_silent_when_a_replay_is_possible(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install(monkeypatch, _FakeTester(_response("NoRule")))
+
+    assert verification_module.unavailable_reason() is None
+
+
+def test_the_probe_names_an_unanswering_socket(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install(monkeypatch, _FakeTester(_response("NoRule"), available=False))
+
+    reason = verification_module.unavailable_reason("/tmp/nope.sock")
+
+    assert reason is not None
+    assert "/tmp/nope.sock" in reason
+
+
+def test_the_probe_reports_a_missing_library_instead_of_raising(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A best-effort caller needs a sentence to print, not an exception to
+    # catch: not having Wazuh on the machine is not an error in the archive.
+    def refuse() -> None:
+        raise RuntimeError("wazuhtester is not installed, so findings cannot be replayed.")
+
+    monkeypatch.setattr(verification_module, "_load_wazuhtester", refuse)
+
+    assert verification_module.unavailable_reason() == "wazuhtester is not installed, so findings cannot be replayed."
+
+
+def test_a_half_removed_install_is_a_reason_not_a_crash(monkeypatch: pytest.MonkeyPatch) -> None:
+    # pip uninstall can leave an empty wazuhtester directory behind, and Python
+    # imports that as a namespace package with no attributes at all. So does
+    # any stray directory of that name on the path. Importing is not the same
+    # as the library being there, and a best-effort caller must not die on it.
+    import sys
+    from types import ModuleType
+
+    monkeypatch.setitem(sys.modules, "wazuhtester", ModuleType("wazuhtester"))
+
+    reason = verification_module.unavailable_reason()
+
+    assert reason is not None
+    assert "is_logtest_available" in reason
+    assert "not a usable install" in reason
+
+
+def test_a_probe_that_raises_still_returns_a_reason(monkeypatch: pytest.MonkeyPatch) -> None:
+    class Exploding(_FakeTester):
+        def is_logtest_available(self, socket_path=None) -> bool:
+            raise PermissionError("cannot read the socket")
+
+    _install(monkeypatch, Exploding(_response("NoRule")))
+
+    reason = verification_module.unavailable_reason()
+
+    assert reason is not None
+    assert "cannot read the socket" in reason

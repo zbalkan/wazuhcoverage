@@ -2,7 +2,11 @@
 
 `wazuhcoverage` answers one question about a Wazuh deployment: of everything the agents actually sent, how much did the ruleset do anything with? It reads a JSON archive, sorts every event into one of four coverage buckets, groups the uncovered ones into a short list of findings, and hands you one real log line per finding that you can replay through `wazuh-logtest`.
 
-It works on `archives.json` and `archives.json.gz` produced by `<logall_json>yes</logall_json>`, read-only. By default it is fully offline: it contacts no manager, API, or indexer, so it is safe to run against a copy of an archive on a laptop. Pass `--logtest` and it additionally replays one sample per finding through a Wazuh manager's `wazuh-logtest` socket, which recovers the one thing an archive cannot tell you — whether an event nothing alerted on was unmatched or deliberately silenced.
+It works on `archives.json` and `archives.json.gz` produced by `<logall_json>yes</logall_json>`, read-only.
+
+Where it can, it also asks the manager. An archive cannot tell you whether an event nothing alerted on was unmatched or deliberately silenced — Wazuh writes the same record either way — but `wazuh-logtest` can. When its socket is reachable, one representative sample per finding is replayed and the report gains an effective state per finding. When it is not, the run says so on stderr and reports from the archive alone. There is no flag for either; the tool uses what is there.
+
+Read [docs/CAVEATS.md](https://github.com/zbalkan/wazuhcoverage/blob/master/docs/CAVEATS.md) before trusting the numbers. It documents the Wazuh behaviours that make a coverage report harder to read than it looks.
 
 It ships as a library and a CLI in the same distribution. The CLI is a batch runner for a directory full of daily archives; the library is what you call when you want the numbers in your own program. Neither keeps state: a run reads the archives you name, writes its output, and leaves nothing behind.
 
@@ -12,7 +16,7 @@ Python 3.9 or newer on Linux, macOS, or Windows. Two runtime dependencies instal
 
 Python 3.10 or newer is recommended. On 3.9 the DuckDB dependency is capped at `duckdb<1.5`, which no longer receives upstream fixes; 3.9 is kept only as a floor for hosts that still ship it.
 
-Verification through `wazuh-logtest` is an optional extra with stricter requirements of its own: Linux, Python 3.10 or newer, and a reachable manager. Without it the tool behaves exactly as before.
+Replaying findings through `wazuh-logtest` is an optional extra with stricter requirements of its own: Linux, Python 3.10 or newer, and a reachable manager. It is used automatically when all three hold, and skipped with a warning when any does not.
 
 One caveat applies to shared environments rather than to `pipx`: drain3 0.9.11 pins `jsonpickle` and `cachetools` to exact versions, so a project that itself requires `cachetools>=5` cannot install this package alongside it. See [design notes](https://github.com/zbalkan/wazuhcoverage/blob/master/docs/design-notes.md#dependency-constraints) if you hit that.
 
@@ -32,20 +36,20 @@ To use the library from another project, install it into that project's environm
 python -m pip install wazuhcoverage
 ```
 
-To also replay findings through `wazuh-logtest`, install the `logtest` extra on the Wazuh manager itself, or on a host that can reach its socket:
+To let it replay findings through `wazuh-logtest`, install the `logtest` extra on the Wazuh manager itself, or on a host that can reach its socket:
 
 ```bash
 pipx install "wazuhcoverage[logtest]"
 python -m pip install "wazuhcoverage[logtest]"
 ```
 
-The extra pulls in [wazuhtester](https://github.com/zbalkan/wazuhtester), which needs Linux, Python 3.10 or newer, and a running manager. Everything else works without it.
+The extra pulls in [wazuhtester](https://github.com/zbalkan/wazuhtester), which needs Linux, Python 3.10 or newer, and a running manager. Without it, or away from a manager, the tool warns once and reports from the archive alone.
 
 From a local checkout, `pipx install --editable .` for the CLI or `python -m pip install -e .` for the library.
 
 ## Quick start
 
-Point it at one archive and read the report:
+Point it at one archive and read the report. Run it on the manager and it also replays what it finds:
 
 ```bash
 wazuhcoverage /var/ossec/logs/archives/2026/Sep/ossec-archive-18.json.gz
@@ -55,12 +59,6 @@ Sweep a month, then replay everything that is not covered through logtest:
 
 ```bash
 wazuhcoverage --no-stats "/var/ossec/logs/archives/2026/**/*.json.gz" | wazuh-logtest
-```
-
-Ask the manager what actually happens to the events nothing alerted on:
-
-```bash
-wazuhcoverage --logtest /var/ossec/logs/archives/2026/Sep/ossec-archive-18.json.gz
 ```
 
 Feed it an archive on standard input, from a file, a decompressor, or a remote host:
@@ -73,8 +71,7 @@ ssh manager "cat /var/ossec/logs/archives/2026/Sep/ossec-archive-18.json.gz" | w
 ## Command line
 
 ```text
-wazuhcoverage [-n|--no-stats] [-s|--strict] [-l|--logtest]
-              [--log-format FORMAT] [--logtest-socket PATH] [TARGET...]
+wazuhcoverage [-n|--no-stats] [-s|--strict] [--log-format FORMAT] [TARGET...]
 wazuhcoverage (-V|--version)
 wazuhcoverage (-h|--help)
 ```
@@ -85,26 +82,24 @@ There are no subcommands. Each `TARGET` is a literal path, a glob, or `-` for st
 | --- | --- | --- |
 | `-n` | `--no-stats` | Write only one representative log line per finding to stdout, one per row. Everything else goes to stderr. |
 | `-s` | `--strict` | Reject the whole archive on the first unparseable line instead of skipping and counting it. |
-| `-l` | `--logtest` | Replay one sample per finding through `wazuh-logtest` and report its effective state. Needs the `logtest` extra and a reachable manager. |
-|  | `--log-format` | Log format reported to `wazuh-logtest` when replaying. Default `syslog`. |
-|  | `--logtest-socket` | Socket to replay against. Defaults to the Wazuh install location. |
+|  | `--log-format` | Log format reported to `wazuh-logtest` when replaying. Default `syslog`. Ignored when no manager is reachable. |
 | `-V` | `--version` | Print the installed version and exit. Needs no target. |
 | `-h` | `--help` | Print usage and exit. |
 
-The three short behaviour flags take no value, so they can be merged into one cluster in any order. `--log-format` and `--logtest-socket` take values and cannot join a cluster. These are equivalent:
+The two short behaviour flags take no value, so they can be merged in either order. `--log-format` takes a value and cannot join a cluster. These are equivalent:
 
 ```bash
-wazuhcoverage -nsl "/archives/**/*.json.gz"
-wazuhcoverage -lsn "/archives/**/*.json.gz"
-wazuhcoverage -n -s -l "/archives/**/*.json.gz"
-wazuhcoverage --no-stats --strict --logtest "/archives/**/*.json.gz"
+wazuhcoverage -ns "/archives/**/*.json.gz"
+wazuhcoverage -sn "/archives/**/*.json.gz"
+wazuhcoverage -n -s "/archives/**/*.json.gz"
+wazuhcoverage --no-stats --strict "/archives/**/*.json.gz"
 ```
 
 | Exit code | Meaning |
 | --- | --- |
 | `0` | Every matched archive was processed. |
 | `1` | At least one archive failed, or the downstream pipe closed early. |
-| `2` | No target was given or matched, or `--logtest` could not reach a manager. |
+| `2` | No target was given or matched. |
 
 `--version` prints `wazuhcoverage <version>` to stdout and exits `0` without needing a target, so it is safe to call from a health check or a deployment script. The number it prints is the same one the installed distribution carries; `pyproject.toml` reads it from `wazuhcoverage.__version__`, so the two cannot disagree.
 
@@ -231,15 +226,11 @@ The CLI uses an alert threshold of 3. The library takes an `alert_threshold` arg
 
 ### Resolving a `no_alerting_rule` finding
 
-This is the bucket that needs care. Wazuh writes the same rule-less archive record in three different situations: no rule matched at all, a rule matched but sits at level 0, or a rule matched and its `ignore` window suppressed the event. The archive keeps no field that separates them.
+This is the bucket that needs care. Wazuh writes the same rule-less archive record in three different situations: no rule matched at all, a rule matched but sits at level 0, or a rule matched and its `ignore` window suppressed the event. The archive keeps no field that separates them, and [docs/CAVEATS.md](https://github.com/zbalkan/wazuhcoverage/blob/master/docs/CAVEATS.md#an-archived-event-that-matched-a-level-0-rule-carries-no-rule) shows the analysisd code that makes it so.
 
 The three mean different things. A level-0 base rule such as `61100`, catching Windows System events no child rule claimed, is a real coverage gap. A local level-0 rule written to silence a known-noisy source is a decision someone already made. Both otherwise appear with an empty `Rule` and `Level`.
 
-`--logtest` settles it. `wazuh-logtest` reports the rule it matched whatever that rule's level is, because it is a testing interface rather than the alert pipeline, so replaying one sample per finding recovers what the archive discarded:
-
-```bash
-wazuhcoverage --logtest /var/ossec/logs/archives/2026/Sep/ossec-archive-18.json.gz
-```
+A replay settles it, because `wazuh-logtest` reports the rule it matched whatever that rule's level is. Run the tool where the socket is reachable and the report gains an effective state without being asked:
 
 ```text
 Effective coverage (wazuh-logtest)
@@ -268,17 +259,20 @@ no_decoder                         1           118       0.28%
 | `at_or_above_threshold` | A rule matched at or above it. |
 | `unverified` | The replay produced no usable answer. Never inferred from the archive. |
 
-Four things are worth knowing before you trust a run:
+Where no socket is reachable, the run warns once on stderr and the report carries its note instead:
 
-Replay reflects the ruleset on the manager you replay against, not the one that wrote the archive. Replaying last year's archive against today's rules answers "would we catch this now", which is usually the more useful question, but it is a different one.
+```text
+wazuhcoverage: the wazuh-logtest socket at /var/ossec/queue/sockets/logtest is not answering
+wazuhcoverage: reporting from the archive alone, which cannot tell an unmatched event from a silenced one; see docs/CAVEATS.md
+```
 
-Each sample is replayed in a session of its own, so an earlier sample cannot prime a frequency rule and make a later one look covered. The price is the opposite blind spot: a rule that only fires on the Nth event cannot be reproduced from one event, so a finding covered solely by such a rule reports `uncovered`.
+Three things are worth knowing before you trust a replayed run, and all three are expanded in [docs/CAVEATS.md](https://github.com/zbalkan/wazuhcoverage/blob/master/docs/CAVEATS.md):
 
-`--log-format` matters. The archive does not record the format, so it cannot be derived, and the default is `syslog`. An EventChannel or JSON source replayed as `syslog` resolves to the wrong decoder and gives a wrong answer — pass `--log-format json` for a JSON source. The location *is* taken from the archive, so that part of the replay is faithful.
+It answers for the manager you replay against, not the one that wrote the archive. It cannot reproduce a rule that only fires on the Nth event, so a finding covered solely by such a rule reports `uncovered`. And `--log-format` matters: the archive does not record the format, the default is `syslog`, and a JSON or EventChannel source replayed as `syslog` resolves against the wrong decoder chain. The location *is* taken from the archive, so that part is faithful.
 
-A failed replay is `unverified`, never `uncovered`. Inventing a coverage gap out of a broken socket is the one mistake this feature must not make. An unreachable daemon or a missing `logtest` extra stops the run with exit `2` before any archive is scanned.
+A failed replay is `unverified`, never `uncovered`. Inventing a coverage gap out of a broken socket is the one mistake this must not make.
 
-If replaying is not an option, `wazuhcoverage --no-stats ... | wazuh-logtest` does the same thing by hand, and a replay that resolves to a level-0 rule means silenced rather than undetected. Where a level-0 rule dominates a log type and you control its child chain, `<rule id="61100" level="1" overwrite="yes">` restores rule information to the archive itself and collapses those events into one `below_threshold` finding — at the cost of making the event an alert internally, which changes fired counters and what correlation rules keyed on that rule see. The mechanism behind all of this is in the [design notes](https://github.com/zbalkan/wazuhcoverage/blob/master/docs/design-notes.md#why-a-level-0-match-looks-like-no-rule).
+`wazuhcoverage --no-stats ... | wazuh-logtest` still does the same thing by hand, which is useful when the archive and the manager are on different machines.
 
 ## How findings are grouped
 
@@ -332,7 +326,7 @@ Glob expansion, report rendering, stdout and stderr, and exit codes are CLI conc
 
 ### Verifying findings
 
-`verify_findings()` is the library side of `--logtest`. It is a separate call rather than an argument to `analyze_archive()`, so analysis stays offline and pure: nothing in `analyze_archive()` opens a socket, and a caller that never imports this function never needs the optional dependency.
+`verify_findings()` is the library side of what the CLI does automatically. It is a separate call rather than an argument to `analyze_archive()`, so analysis stays offline and pure: nothing in `analyze_archive()` opens a socket, and a caller that never imports this function never needs the optional dependency.
 
 ```python
 from wazuhcoverage import analyze_archive, verify_findings
@@ -350,13 +344,17 @@ for finding in analysis.findings:
 
 Widen `statuses` to replay buckets the archive already resolved — useful for auditing whether the manager still behaves as the archive says, at the cost of a round trip per finding.
 
+The library does not decide policy. `verify_findings()` raises when no manager is reachable, because a caller that asked for a replay is owed the reason; `unavailable_reason(socket_path=None)` returns that reason as a string, or `None` when a replay is possible, which is how the CLI chooses to carry on without one.
+
 ## Limitations
 
 Left to itself the tool reads archives and nothing else, which is what makes it safe to run offline and also what bounds it. From the archive alone it cannot distinguish an unmatched event from a level-0 or suppressed one, and it reports what Wazuh recorded, so an archive written by a manager whose ruleset has since changed describes that older ruleset.
 
 Grouping merges by positional shape, so messages that share a shape but differ in meaning can land in one finding, and a pattern shows `<*>` where a username or path was. The tuning reduces that on the log families it was measured against; it does not eliminate it for shapes that corpus does not cover. Samples are unaffected, so every finding still carries a real line to check.
 
-Replaying through `wazuh-logtest` removes the level-0 ambiguity but introduces its own limits, listed under [Resolving a `no_alerting_rule` finding](#resolving-a-no_alerting_rule-finding): it answers for the manager you replay against rather than the one that wrote the archive, it cannot reproduce a rule that needs several events, and it depends on `--log-format` being right for the source. Without `--logtest`, nothing in this tool opens a socket and it stays installable anywhere a Python interpreter runs.
+Replaying through `wazuh-logtest` removes the level-0 ambiguity and brings limits of its own: it answers for the manager you replay against rather than the one that wrote the archive, it cannot reproduce a rule that needs several events, and it depends on `--log-format` being right for the source. Where no manager is reachable nothing opens a socket, and the tool stays installable anywhere a Python interpreter runs.
+
+[docs/CAVEATS.md](https://github.com/zbalkan/wazuhcoverage/blob/master/docs/CAVEATS.md) collects the Wazuh behaviours behind all of this and is worth reading once before acting on a report.
 
 ## Development
 
@@ -375,7 +373,7 @@ python tools/tune_drain.py
 
 `tools/check_dependency_pins.py` walks the installed dependency graph and fails when an exact version pin appears or disappears. CI runs it on every supported interpreter alongside `pip check`, so a new dependency that narrows what this package can coexist with fails review rather than a user's install.
 
-Design rationale, measurements, and the upstream Wazuh behaviour this tool has to work around live in [docs/design-notes.md](https://github.com/zbalkan/wazuhcoverage/blob/master/docs/design-notes.md).
+Design rationale and measurements live in [docs/design-notes.md](https://github.com/zbalkan/wazuhcoverage/blob/master/docs/design-notes.md). The upstream Wazuh behaviour this tool works around is in [docs/CAVEATS.md](https://github.com/zbalkan/wazuhcoverage/blob/master/docs/CAVEATS.md).
 
 ## License
 
