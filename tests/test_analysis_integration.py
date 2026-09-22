@@ -244,6 +244,66 @@ def test_representative_sample_is_deterministic(tmp_path: Path) -> None:
     assert first.findings[0].sample_log == second.findings[0].sample_log == "event 12345"
 
 
+def test_replay_metadata_comes_from_the_representative_sample(tmp_path: Path) -> None:
+    archive = tmp_path / "archives.json"
+    _write_jsonl(
+        archive,
+        [
+            {
+                "location": "sample-location",
+                "full_log": "application event alpha",
+                "decoder": {"name": "application"},
+            },
+            {
+                "location": "other-location",
+                "full_log": "application event beta",
+                "decoder": {"name": "application"},
+            },
+        ],
+    )
+
+    finding = analyze_archive(archive).findings[0]
+
+    assert finding.sample_log == "application event alpha"
+    assert finding.observed_location == "sample-location"
+
+
+def test_null_replay_metadata_is_not_replaced_from_another_event(tmp_path: Path) -> None:
+    archive = tmp_path / "archives.json"
+    _write_jsonl(
+        archive,
+        [
+            {"full_log": "application event alpha", "decoder": {"name": "application"}},
+            {
+                "location": "other-location",
+                "full_log": "application event beta",
+                "decoder": {"name": "application"},
+            },
+        ],
+    )
+
+    finding = analyze_archive(archive).findings[0]
+
+    assert finding.sample_log == "application event alpha"
+    assert finding.observed_location is None
+
+
+def test_finding_key_serializes_components_without_delimiter_collisions(tmp_path: Path) -> None:
+    archive = tmp_path / "archives.json"
+    _write_jsonl(
+        archive,
+        [
+            {"location": "a|b", "full_log": "c", "decoder": {}},
+            {"location": "a", "full_log": "b|c", "decoder": {}},
+        ],
+    )
+
+    findings = analyze_archive(archive).findings
+
+    assert len(findings) == 2
+    assert len({finding.finding_key for finding in findings}) == 2
+
+
 def test_masking_runs_before_mining_and_constant_values_survive_both(tmp_path: Path) -> None:
     archive = tmp_path / "archives.json"
     _write_jsonl(

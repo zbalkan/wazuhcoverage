@@ -1,7 +1,10 @@
 import json
 from pathlib import Path
 
+import duckdb
+
 from wazuhcoverage import analyze_archive
+from wazuhcoverage.analysis import _load_templates
 
 
 def _write_jsonl(path: Path, rows: list[dict]) -> None:
@@ -142,6 +145,16 @@ def test_messages_containing_csv_metacharacters_still_group_correctly(tmp_path: 
     # contract.
     expected_samples = {text.replace("\r\n", " ").replace("\n", " ") for text in nasty}
     assert all(f.sample_log in expected_samples for f in result.findings)
+
+
+def test_template_bulk_load_preserves_ndjson_metacharacters() -> None:
+    connection = duckdb.connect(":memory:")
+    connection.execute("CREATE TABLE templates (template_id INTEGER, log_template VARCHAR)")
+    templates = [(1, 'quote=" pipe=| newline=\n snowman=☃'), (2, "carriage=\r return")]
+
+    _load_templates(connection, templates)
+
+    assert connection.execute("SELECT * FROM templates ORDER BY template_id").fetchall() == templates
 
 
 def test_distinct_families_are_not_merged(tmp_path: Path) -> None:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import json
 import os
 import tempfile
 from pathlib import Path
@@ -50,15 +51,13 @@ _DRAIN_DEPTH = 4
 # took 1,373 seconds and peaked at 127 MB, so the cost grows far faster than
 # the input. Capping the live clusters bounds it -- the same 120,000 messages
 # took 449 seconds and 25 MB under a 20,000 cluster cap. A cluster costs about
-# 1.1 KB, so this bound holds the miner near 55 MB.
+# 1.1 KB, so this bound holds the miner near 22 MB and avoids permitting the
+# roughly 2.5-times-longer scan implied by the former 50,000-cluster cap.
 #
-# It sits far above the vocabulary of a real archive, where messages group and
-# mining that volume stays under two seconds, so eviction is a safety valve
-# rather than part of normal operation, and an archive that reaches the cap has
-# more distinct shapes than a coverage report could be read from. Templates are
+# Eviction is a safety valve rather than part of normal grouping. Templates are
 # keyed by text, so a cluster recreated after an eviction still lands in its
 # original finding.
-_DRAIN_MAX_CLUSTERS = 50_000
+_DRAIN_MAX_CLUSTERS = 20_000
 
 
 def _build_template_miner() -> Any:
@@ -454,10 +453,7 @@ def _create_template_map(connection: Any, miner: Any) -> None:
         return
 
     _load_log_templates(connection, [(log_id, template_ids[mined[cluster]]) for log_id, cluster in assignments])
-    connection.executemany(
-        "INSERT INTO templates VALUES (?, ?)",
-        [(template_id, template) for template, template_id in template_ids.items()],
-    )
+    _load_templates(connection, [(template_id, template) for template, template_id in template_ids.items()])
 
 
 def _load_log_templates(connection: Any, assignments: list[tuple[int, int]]) -> None:
@@ -481,6 +477,30 @@ def _load_log_templates(connection: Any, assignments: list[tuple[int, int]]) -> 
         connection.execute(
             "INSERT INTO log_templates SELECT * FROM "
             "read_csv(?, header = false, columns = {'log_id': 'BIGINT', 'template_id': 'INTEGER'})",
+            [path],
+        )
+    finally:
+        os.unlink(path)
+
+
+def _load_templates(connection: Any, templates: list[tuple[int, str]]) -> None:
+    """Bulk-load template text through NDJSON instead of per-row bindings."""
+
+    handle, path = tempfile.mkstemp(prefix="wazuhcoverage-template-text-", suffix=".json")
+    os.close(handle)
+    try:
+        with open(path, "w", encoding="utf-8") as stream:
+            for template_id, template in templates:
+                json.dump({"template_id": template_id, "log_template": template}, stream, ensure_ascii=False)
+                stream.write("\n")
+        connection.execute(
+            """
+            INSERT INTO templates
+            SELECT
+                cast(json_extract(json, '$.template_id') AS INTEGER),
+                json_extract_string(json, '$.log_template')
+            FROM read_ndjson_objects(?)
+            """,
             [path],
         )
     finally:
@@ -522,13 +542,13 @@ def _create_finding_views(connection: Any) -> None:
                 WHEN n.observed_status = 'below_threshold' THEN NULL
                 ELSE n.location
             END AS finding_location,
-            md5(
+            md5(to_json(
                 CASE
                     WHEN n.observed_status = 'below_threshold'
-                        THEN concat(n.observed_status, '|', coalesce(n.rule_id, 'unknown'))
-                    ELSE concat(n.observed_status, '|', n.log_type, '|', {pattern})
+                        THEN [n.observed_status, coalesce(n.rule_id, 'unknown')]
+                    ELSE [n.observed_status, n.log_type, {pattern}]
                 END
-            ) AS finding_key
+            )) AS finding_key
         FROM {source}
         WHERE n.observed_status <> 'at_or_above_threshold'
           AND n.full_log IS NOT NULL
@@ -550,10 +570,26 @@ def _create_finding_views(connection: Any) -> None:
             count(DISTINCT agent_id) FILTER (WHERE agent_id IS NOT NULL) AS affected_agents,
             strftime(min(event_timestamp), '%Y-%m-%d %H:%M:%S%z') AS first_seen,
             strftime(max(event_timestamp), '%Y-%m-%d %H:%M:%S%z') AS last_seen,
-            any_value(finding_decoder) AS observed_decoder,
-            any_value(finding_location) AS observed_location,
-            any_value(rule_id) AS observed_rule_id,
-            any_value(rule_level) AS observed_rule_level,
+            arg_min(struct_pack(decoder := finding_decoder, location := finding_location,
+                rule := rule_id, level := rule_level),
+                struct_pack(log := full_log, location := coalesce(finding_location, ''),
+                decoder := coalesce(finding_decoder, ''), rule := coalesce(rule_id, ''),
+                level := coalesce(rule_level, -1))).decoder AS observed_decoder,
+            arg_min(struct_pack(decoder := finding_decoder, location := finding_location,
+                rule := rule_id, level := rule_level),
+                struct_pack(log := full_log, location := coalesce(finding_location, ''),
+                decoder := coalesce(finding_decoder, ''), rule := coalesce(rule_id, ''),
+                level := coalesce(rule_level, -1))).location AS observed_location,
+            arg_min(struct_pack(decoder := finding_decoder, location := finding_location,
+                rule := rule_id, level := rule_level),
+                struct_pack(log := full_log, location := coalesce(finding_location, ''),
+                decoder := coalesce(finding_decoder, ''), rule := coalesce(rule_id, ''),
+                level := coalesce(rule_level, -1))).rule AS observed_rule_id,
+            arg_min(struct_pack(decoder := finding_decoder, location := finding_location,
+                rule := rule_id, level := rule_level),
+                struct_pack(log := full_log, location := coalesce(finding_location, ''),
+                decoder := coalesce(finding_decoder, ''), rule := coalesce(rule_id, ''),
+                level := coalesce(rule_level, -1))).level AS observed_rule_level,
             -- The representative is still the deterministic min() of the raw
             -- logs; only its line breaks are collapsed. A sample exists to be
             -- replayed through wazuh-logtest, which reads one log per line, so

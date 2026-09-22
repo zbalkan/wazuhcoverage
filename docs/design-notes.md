@@ -32,7 +32,7 @@ The unit of replay is the finding, not the event. That is what grouping bought: 
 
 ### Location, and what could not be derived
 
-`Finding` carries `observed_location`, taken from the archive with `any_value()` over the group, because the decoder chain consults it. `log_format` could not be handled the same way, since the archive does not record it; it is a parameter with wazuh-logtest's own `syslog` default. Both are covered in [CAVEATS.md](CAVEATS.md#location-is-preserved-log-format-is-not).
+`Finding` carries `observed_location` because the decoder chain consults it. The location and other replay metadata are selected from the same deterministically chosen event as the representative sample, rather than independently from the group. `log_format` cannot be handled the same way, since the archive does not record it; it is a parameter with wazuh-logtest's own `syslog` default. Both are covered in [CAVEATS.md](CAVEATS.md#location-is-preserved-log-format-is-not).
 
 ### Failure is never a gap
 
@@ -62,7 +62,7 @@ The parameters are set in `wazuhcoverage.analysis` and differ from the drain3 de
 | --- | --- | --- | --- |
 | `sim_th` | 0.56 | 0.4 | The default merges log families a coverage report must separate. |
 | `depth` | 4 | 4 | Unchanged; 3 measured identically and 5 only fragmented further. |
-| `max_clusters` | 50,000 | unbounded | Bounds mining time and memory on input that defeats grouping. |
+| `max_clusters` | 20,000 | unbounded | Bounds mining time and memory on input that defeats grouping. |
 | `parametrize_numeric_tokens` | `true` | `true` | Unchanged; disabling it multiplied templates without preventing a merge. |
 
 The similarity threshold is the consequential one, and both directions fail loudly. At the drain3 default of 0.4 the corpus merges Windows `4624` with `4625` — a successful logon reported together with a failed one — and firewall `ACCEPT` with `DROP`. Above 0.57 the count jumps from 25 templates to 93 as families whose variable tokens are paths or hostnames shatter into one finding per value. Across three corpus seeds, 0.56 and 0.57 were the only values with neither defect, so 0.56 is taken with margin on both sides. Two tests in `tests/test_template_mining.py` guard that band: one fails if opposite outcomes of a family merge, the other if a high-cardinality family fragments.
@@ -71,9 +71,9 @@ drain3 is configured explicitly rather than from a `drain3.ini`, because the lib
 
 ### Cost and the cluster cap
 
-Mining cost tracks an archive's vocabulary, not its event count, because DuckDB deduplicates first and drain3 only ever sees the distinct masked strings. It degrades sharply only when messages share no structure at all, since every message then becomes its own cluster. Measured on such input, 60,000 distinct shapes took 103 seconds, and 120,000 took 1,373 seconds while peaking at 127 MB — the cost grows far faster than the input.
+DuckDB deduplicates messages before mining, so repeated events are cheap, but the mining cost depends on both the archive's vocabulary and the number of candidate clusters in a Drain leaf. With the current syslog normalization and tree depth, the leading `<TIMESTAMP>` token provides no useful routing; unique-heavy input can therefore approach a pairwise scan until the cluster cap is reached. Measured on structure-free input, 60,000 distinct shapes took 103 seconds, and 120,000 took 1,373 seconds while peaking at 127 MB.
 
-Capping the live clusters bounds it: the same 120,000 shapes took 449 seconds and 25 MB under a 20,000 cluster cap. A cluster costs about 1.1 KB, so the 50,000 cap holds the miner near 55 MB. That sits far above the vocabulary of a real archive, where messages group and mining stays under two seconds, so eviction is a safety valve rather than part of normal operation. An archive that reaches the cap carries more distinct shapes than a coverage report could be read from.
+Capping the live clusters bounds the candidate scan: the same 120,000 shapes took 449 seconds and 25 MB under the selected 20,000-cluster cap. Eviction is a safety valve and can change grouping after the cap is reached; templates remain keyed by text so a recreated cluster still rejoins its original finding.
 
 ### Determinism
 
@@ -105,9 +105,11 @@ DuckDB's Python parameter binding costs roughly 140 microseconds per row for bul
 
 Only integers are written to that file. No log text passes through CSV quoting, so an embedded delimiter, quote, or newline in a message cannot corrupt the join key.
 
+The template-text table likewise avoids per-row parameter binding, but uses a temporary NDJSON file because it must preserve arbitrary log text. JSON escaping makes quotes, pipes, line breaks and Unicode unambiguous. The file is removed before the load returns.
+
 ## Samples
 
-A finding's representative is the deterministic `min()` of its raw logs, with only its line breaks collapsed. The sample exists to be replayed through `wazuh-logtest`, which reads one log per line, so a multi-line log emitted verbatim would be replayed as several unrelated logs — the first tested against the wrong decoder and the rest as fragments no rule was ever written for.
+A finding's representative is the deterministic `min()` of its raw logs, with only its line breaks collapsed. Its location, decoder and rule metadata all come from that same source event; ties between identical raw logs are resolved by those metadata fields. The sample exists to be replayed through `wazuh-logtest`, which reads one log per line, so a multi-line log emitted verbatim would be replayed as several unrelated logs — the first tested against the wrong decoder and the rest as fragments no rule was ever written for.
 
 `Finding.sample_log` carries the collapsed value, so an API consumer that replays samples gets the same guarantee the CLI does. `message_pattern` is not collapsed, because it is a grouping key and is reported verbatim; the report collapses it only while rendering.
 
