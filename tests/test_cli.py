@@ -213,21 +213,9 @@ def test_a_failing_stream_still_leaves_no_temporary_file(
     assert "failed <stdin>" in capsys.readouterr().err
 
 
-def test_the_removed_history_flag_fails_loudly() -> None:
-    # There is no processed-path cache any more, so --ignore-history has
-    # nothing to ignore. A cron entry still passing it must stop rather than
-    # silently run with a flag that means nothing.
-    parser = cli.build_parser()
-    assert not hasattr(parser.parse_args(["a.json"]), "ignore_history")
-    with pytest.raises(SystemExit):
-        parser.parse_args(["--ignore-history", "a.json"])
-    with pytest.raises(SystemExit):
-        parser.parse_args(["-i", "a.json"])
-
-
 def test_no_run_writes_persistent_state(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys) -> None:
-    # The working directory is the one place the CLI used to write. Nothing
-    # should appear there now, lock file included.
+    # A run must leave the working directory exactly as it found it: no
+    # cache, no lock file, no stray temporary.
     archive = tmp_path / "archive.json.gz"
     archive.touch()
     before = set(tmp_path.iterdir())

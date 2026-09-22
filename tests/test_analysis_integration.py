@@ -496,9 +496,10 @@ def test_a_level_zero_match_is_archived_as_no_alerting_rule(tmp_path: Path) -> N
 
 
 def test_no_alerting_rule_is_the_declared_bucket_name() -> None:
-    # The name is load-bearing: "no_rule" asserted that no rule was evaluated,
-    # which an archive record cannot show. Pin the identifier so the weaker,
-    # provable claim is not quietly renamed back.
+    # The name is load-bearing. "no_rule" would assert that no rule was
+    # evaluated, which an archive record cannot show, and a reader who acts on
+    # that name writes a rule for an event a level-0 rule already recognises.
+    # Pin the identifier so the weaker, provable claim survives a refactor.
     from wazuhcoverage.models import STATUSES
 
     assert STATUSES == (

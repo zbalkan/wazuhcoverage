@@ -122,7 +122,7 @@ Across runs, narrow the targets rather than asking the tool to remember. A dated
 wazuhcoverage "/var/ossec/logs/archives/2026/Sep/ossec-archive-$(date +%d).json.gz"
 ```
 
-Earlier versions kept a `history.db` of processed paths in the working directory. It is gone, along with `--ignore-history`; passing that flag now fails rather than being accepted as a no-op. A processed-path cache made a run's behaviour depend on where it was launched from and on a file nobody looked at, and it bought only what a glob already gives.
+There is deliberately no processed-path cache. One would make a run's behaviour depend on the directory it was launched from and on a file nobody inspects, and it would buy only what a narrower glob already gives.
 
 ### Reading from standard input
 
@@ -324,6 +324,8 @@ for finding in analysis.findings:
 | `Finding` | `finding_key`, `observed_status`, `log_type`, `message_pattern`, `event_count`, `affected_agents`, `first_seen`, `last_seen`, `observed_decoder`, `observed_location`, `observed_rule_id`, `observed_rule_level`, `sample_log` |
 | `Verification` | `finding_key`, `effective_state`, `logtest_status`, `decoder`, `rule_id`, `rule_level`, `rule_description`, `rule_groups`, `error` |
 
+`STATUSES` names the archive's buckets and `EFFECTIVE_STATES` names the replay verdicts. They are separate because they answer different questions: one reports what the record holds, the other what the manager does.
+
 All models are frozen dataclasses and every collection is a tuple, so a result can be cached or shared without defensive copying. `LogTypeCount.percentage` is the pair's share of the whole archive; `status_percentage` is its share of that one bucket, which ranks a log type inside a small bucket that a whole-archive percentage would flatten to nothing. The package is `py.typed`, and annotations resolve under `typing.get_type_hints()` on every supported interpreter.
 
 Glob expansion, report rendering, stdout and stderr, and exit codes are CLI concerns and are deliberately outside the analysis API.
@@ -348,17 +350,9 @@ for finding in analysis.findings:
 
 Widen `statuses` to replay buckets the archive already resolved — useful for auditing whether the manager still behaves as the archive says, at the cost of a round trip per finding.
 
-### Compatibility
-
-The status strings carried by `StatusCount.status`, `LogTypeCount.status`, and `Finding.observed_status` are part of the API surface. Version 0.4.0 renamed `no_rule` to `no_alerting_rule`; a consumer matching on the old string must be updated. No alias is provided, because the old name asserted something an archive cannot show.
-
-Version 0.5.0 also removes the `history.db` processed-path cache and the `--ignore-history` / `-i` flag that governed it. A run keeps no state, so `--ignore-history` is now the default and only behaviour; a script still passing the flag exits `2` with a usage error rather than running with a flag that means nothing. Delete any leftover `history.db` and `.history.db.lock`; nothing reads them.
-
-Version 0.5.0 adds `Finding.observed_location`, which the replay needs in order to be faithful. `Finding` is a frozen dataclass, so code constructing one positionally has to be updated; code reading fields by name does not. `EFFECTIVE_STATES` names the replay verdicts and is separate from `STATUSES`, which still names the archive's buckets — the two answer different questions and are deliberately not merged.
-
 ## Limitations
 
-The tool reads archives and nothing else, which is what makes it safe to run offline, and also what bounds it. It cannot distinguish an unmatched event from a level-0 or suppressed one, as described above. It reports what Wazuh recorded, so an archive written by a manager whose ruleset has since changed describes that older ruleset.
+Left to itself the tool reads archives and nothing else, which is what makes it safe to run offline and also what bounds it. From the archive alone it cannot distinguish an unmatched event from a level-0 or suppressed one, and it reports what Wazuh recorded, so an archive written by a manager whose ruleset has since changed describes that older ruleset.
 
 Grouping merges by positional shape, so messages that share a shape but differ in meaning can land in one finding, and a pattern shows `<*>` where a username or path was. The tuning reduces that on the log families it was measured against; it does not eliminate it for shapes that corpus does not cover. Samples are unaffected, so every finding still carries a real line to check.
 

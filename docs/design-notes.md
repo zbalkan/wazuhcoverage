@@ -14,7 +14,7 @@ The data cannot be repaired after the fact, but it can be asked again. `wazuh-lo
 
 For a report without a manager, three consequences follow, and all three are deliberate:
 
-The bucket is named for what the record proves — no alerting rule was attached — rather than for the stronger claim that no rule was evaluated. The report prints a note beside the findings whenever the bucket holds events, because an empty `Rule` and `Level` otherwise imply that stronger claim on their own. And no alias is kept for the old `no_rule` name, since an alias would keep the misleading name readable in reports.
+The bucket is named for what the record proves — no alerting rule was attached — rather than for the stronger claim that no rule was evaluated. `no_rule`, the obvious name, is the one it must not have: a reader acts on that name, and acting on it means writing a rule for an event a level-0 rule already recognises. The report prints a note beside the findings whenever the bucket holds events, because an empty `Rule` and `Level` otherwise imply the stronger claim on their own.
 
 `tests/test_analysis_integration.py` pins both the bucket name and the classification of a real archived EventChannel event that logtest resolves to rule `61100` at level 0.
 
@@ -113,13 +113,13 @@ A finding's representative is the deterministic `min()` of its raw logs, with on
 
 ## No persistent state
 
-The CLI used to keep `history.db`, a JSON array of successfully processed absolute paths, written to the current working directory and guarded by a sidecar lock. It is gone, and with it `--ignore-history`, the atomic-write and locking code, and the recovery path for a corrupt or legacy-pickle history file.
+A run writes nothing but stdout and stderr. There is no processed-path cache, no lock file, and no flag to bypass one.
 
-It was removed rather than fixed because it answered a question a glob already answers, and it charged for the answer. A run's behaviour depended on which directory it was launched from, so the same command meant different things from `/root` and from a cron working directory. The file was state nobody inspected, whose staleness was invisible until a re-analysis silently did nothing. Skipping was also keyed on the path, not the content, so a rotated archive rewritten under a name already recorded was never re-read.
+The obvious design is a JSON list of processed absolute paths in the working directory, skipped on the next run. It answers a question a narrower glob already answers, and it charges for the answer three times over. A run's behaviour comes to depend on the directory it was launched from, so the same command means different things from a shell and from cron. The file is state nobody inspects, whose staleness is invisible until a re-analysis silently does nothing. And skipping keys on the path rather than the content, so an archive rotated under a name already recorded is never re-read — a correctness hole, not merely wasted work.
 
-Deduplication within one run never depended on it: `resolve_targets` collapses literal paths and globs into a set of absolute paths, so overlapping targets are read once whatever the user types. Across runs, narrowing the target is both cheaper and auditable.
+Deduplication within one run needs none of it: `resolve_targets` collapses literal paths and globs into a set of absolute paths, so overlapping targets are read once whatever the user types.
 
-What the removal costs is honest: a nightly sweep over a growing archive directory now re-reads what it read yesterday unless its glob is narrowed. A dated glob is one shell expansion, and it puts the decision in the command where it can be read.
+The cost is real and belongs in the open: a nightly sweep over a growing archive directory re-reads what it read yesterday unless its glob is dated. A dated glob is one shell expansion, and it puts the decision in the command where it can be read.
 
 ## Dependency constraints
 
