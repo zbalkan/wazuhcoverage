@@ -422,6 +422,36 @@ def test_log_format_keeps_its_documented_default() -> None:
     assert cli.build_parser().parse_args(["a.json"]).log_format == "syslog"
 
 
+def test_log_format_has_a_short_form() -> None:
+    parser = cli.build_parser()
+
+    assert parser.parse_args(["-f", "json", "a.json"]).log_format == "json"
+    assert parser.parse_args(["--log-format", "json", "a.json"]).log_format == "json"
+
+
+def test_the_short_log_format_closes_a_cluster() -> None:
+    # -f takes a value, so argparse reads the rest of the cluster as that
+    # value. Closing a cluster is the only position where it means what the
+    # README says it means, in either the separated or the attached spelling.
+    parser = cli.build_parser()
+
+    for argv in (["-snf", "json", "a.json"], ["-snfjson", "a.json"]):
+        arguments = parser.parse_args(argv)
+        assert (arguments.strict, arguments.no_stats, arguments.log_format) == (True, True, "json")
+        assert arguments.targets == ["a.json"]
+
+
+def test_a_mid_cluster_log_format_swallows_the_rest_of_the_cluster() -> None:
+    # Documented rather than defended against: this is how getopt has always
+    # treated an option with an argument. The test exists so the README's
+    # warning cannot drift away from what the parser actually does.
+    arguments = cli.build_parser().parse_args(["-fsn", "json", "a.json"])
+
+    assert arguments.log_format == "sn"
+    assert (arguments.strict, arguments.no_stats) == (False, False)
+    assert arguments.targets == ["json", "a.json"]
+
+
 def test_a_reachable_daemon_is_used_without_being_asked(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys
 ) -> None:

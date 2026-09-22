@@ -37,12 +37,17 @@ _GZIP_MAGIC = b"\x1f\x8b"
 
 
 def build_parser() -> argparse.ArgumentParser:
-    # The short behaviour flags are single-character store_true options, so
+    # The two behaviour flags are single-character store_true options, so
     # argparse accepts them merged into one cluster (-ns, -sn) as well as
-    # separately. Keeping them single-character is what preserves that, and
-    # the long forms stay the documented spelling for anything written into a
-    # cron entry or a script. --log-format takes a value, so it has no short
-    # form and cannot join a cluster.
+    # separately. Keeping them single-character is what preserves that.
+    #
+    # -f takes a value, which makes it the one short flag whose position in a
+    # cluster matters. It may close one, because argparse reads the rest of
+    # the cluster as its value: -snf json and -snfjson both work, while
+    # -fsn json quietly takes "sn" as the format and leaves json as a target.
+    # That is how getopt has always treated an option with an argument, so it
+    # is documented rather than defended against, and the long forms stay the
+    # spelling for anything written into a cron entry or a script.
     parser = argparse.ArgumentParser(
         prog="wazuhcoverage",
         description="Analyze Wazuh JSON archives and emit coverage statistics or representative samples.",
@@ -70,6 +75,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Fail an archive on the first unparseable line instead of skipping and counting it.",
     )
     parser.add_argument(
+        "-f",
         "--log-format",
         default=DEFAULT_LOG_FORMAT,
         metavar="FORMAT",

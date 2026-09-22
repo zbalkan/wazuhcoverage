@@ -71,7 +71,7 @@ ssh manager "cat /var/ossec/logs/archives/2026/Sep/ossec-archive-18.json.gz" | w
 ## Command line
 
 ```text
-wazuhcoverage [-n|--no-stats] [-s|--strict] [--log-format FORMAT] [TARGET...]
+wazuhcoverage [-n|--no-stats] [-s|--strict] [-f|--log-format FORMAT] [TARGET...]
 wazuhcoverage (-V|--version)
 wazuhcoverage (-h|--help)
 ```
@@ -82,11 +82,11 @@ There are no subcommands. Each `TARGET` is a literal path, a glob, or `-` for st
 | --- | --- | --- |
 | `-n` | `--no-stats` | Write only one representative log line per finding to stdout, one per row. Everything else goes to stderr. |
 | `-s` | `--strict` | Reject the whole archive on the first unparseable line instead of skipping and counting it. |
-|  | `--log-format` | Log format reported to `wazuh-logtest` when replaying. Default `syslog`. Ignored when no manager is reachable. |
+| `-f` | `--log-format` | Log format reported to `wazuh-logtest` when replaying. Default `syslog`. Ignored when no manager is reachable. |
 | `-V` | `--version` | Print the installed version and exit. Needs no target. |
 | `-h` | `--help` | Print usage and exit. |
 
-The two short behaviour flags take no value, so they can be merged in either order. `--log-format` takes a value and cannot join a cluster. These are equivalent:
+The two behaviour flags take no value, so they can be merged in either order. These are equivalent:
 
 ```bash
 wazuhcoverage -ns "/archives/**/*.json.gz"
@@ -94,6 +94,17 @@ wazuhcoverage -sn "/archives/**/*.json.gz"
 wazuhcoverage -n -s "/archives/**/*.json.gz"
 wazuhcoverage --no-stats --strict "/archives/**/*.json.gz"
 ```
+
+`-f` takes a value, so it may only close a cluster, where the rest of the cluster is read as that value. These are equivalent:
+
+```bash
+wazuhcoverage -snf json "/archives/**/*.json.gz"
+wazuhcoverage -snfjson "/archives/**/*.json.gz"
+wazuhcoverage -sn -f json "/archives/**/*.json.gz"
+wazuhcoverage --strict --no-stats --log-format json "/archives/**/*.json.gz"
+```
+
+Put `-f` anywhere else in a cluster and it swallows what follows it: `-fsn json` sets the format to `sn` and treats `json` as a target. That is how every getopt-style parser treats an option with an argument, so prefer the long form in anything you will read again.
 
 | Exit code | Meaning |
 | --- | --- |
