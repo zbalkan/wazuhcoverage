@@ -1,105 +1,80 @@
 # Caveats
 
-Wazuh behaves, in a few places, in ways that surprise anyone reading its output at face value. None of these are bugs this project can fix, and all of them change how a coverage report should be read. Line references are to [wazuh/wazuh v4.12.0](https://github.com/wazuh/wazuh/tree/v4.12.0) and have been stable across the 4.x line; re-check them against a later major version before relying on the wording.
+This page documents the limits that matter when interpreting a `wazuhcoverage` result. It does not repeat Wazuh's general architecture or tool documentation; those references are collected at the end.
 
-## An archived event that matched a level-0 rule carries no rule
+The most important distinction is between **what the archive proves** and **what a replay against a manager shows now**.
 
-This is the one that matters most, because it makes a silenced event and an uncovered event indistinguishable in `archives.json`.
+## A rule-less archive record is ambiguous
 
-In `src/analysisd/analysisd.c`, the rule-matching loop abandons a level-0 match well before it records which rule matched:
+A decoded event with no rule object in `archives.json` does not prove that no rule was evaluated. In the Wazuh analysis path, the same observable archive state can result from different outcomes, including:
 
-```c
-/* Ignore level 0 */
-if (t_currently_rule->level == 0) {
-    break;                                  /* line 2083 */
-}
-...
-/* Pointer to the rule that generated it */
-lf->generated_rule = t_currently_rule;      /* line 2111 */
-```
-
-A few lines further down the same pointer is cleared again when a rule's `ignore` window swallows a repeated event:
-
-```c
-if (t_currently_rule->ckignore && IGnore(lf, t_id)) {
-    lf->generated_rule = NULL;              /* line 2116 */
-    break;
-}
-```
-
-The archive record is queued to the writer thread in every one of those cases (line 2199), but `Eventinfo_to_jsonstr` in `src/analysisd/format/to_json.c` builds the `rule` object only when the pointer survived:
-
-```c
-if(lf->generated_rule){
-    cJSON_AddItemToObject(root, "rule", rule = cJSON_CreateObject());   /* line 48 */
-}
-```
-
-So three different outcomes reach `archives.json` as the same rule-less record:
-
-| What analysisd did | What the archive shows |
+| Analysis outcome | Archive observation |
 | --- | --- |
-| No rule matched at all | no `rule` object |
-| A rule matched at level 0 | no `rule` object |
-| A rule matched and its `ignore` window suppressed the event | no `rule` object |
+| No rule matched | no `rule` object |
+| A level-0 rule matched | no `rule` object |
+| A matching rule was suppressed by its `ignore` window | no `rule` object |
 
-Nothing else in the record separates them, which is why this tool's bucket is called `no_alerting_rule` rather than `no_rule`: the archive proves that no alerting rule was attached, and nothing more. Acting on the stronger reading means writing a rule for an event that a level-0 rule already recognises.
+That is why the observed bucket is named `no_alerting_rule`, not `no_rule`. The archive proves that no alerting rule was attached to the archived record; it does not prove why.
 
-The three matter differently. A level-0 base rule such as `61100`, catching Windows System events no child rule claimed, is a genuine coverage gap. A local level-0 rule written to silence a known-noisy source is a decision somebody already made. An `ignore` suppression is neither — the rule works and fired recently.
+This behaviour was verified against Wazuh 4.12 analysisd. The relevant implementation points are the [rule-processing path](https://github.com/wazuh/wazuh/blob/v4.12.0/src/analysisd/analysisd.c#L2083-L2116) and [JSON serialization](https://github.com/wazuh/wazuh/blob/v4.12.0/src/analysisd/format/to_json.c#L48-L86). Re-check the behaviour when adopting a later major Wazuh version.
 
-## `rule.level` is omitted when the level is zero
+A missing or unusable rule level is therefore not treated as proof of a level-0 match. `wazuhcoverage` classifies what the archive demonstrates and leaves stronger conclusions to replay.
 
-Also in `to_json.c`, the level is written only when it is truthy:
+## Replay can refine the result
 
-```c
-if(lf->generated_rule->level) {
-    cJSON_AddNumberToObject(rule, "level", lf->generated_rule->level);   /* line 86 */
-}
-```
+`wazuh-logtest` reports the rule selected during testing, including level-0 rules. When the optional replay integration is available, `wazuhcoverage` sends one representative sample per relevant finding and records an effective state beside the archive observation.
 
-Taken alone this says a rule with no `level` field is a level-0 rule. It is not safe to read it that way. The level-0 `break` above means a record carrying a rule at all has already passed a non-zero level check, so the combination should not occur; a record that has both is evidence that something else produced it, not evidence of a silenced event. `wazuhcoverage` therefore treats a rule with an unusable level as `below_threshold` — it cannot be shown to meet the threshold — rather than inferring zero.
+The archive fields are not overwritten. They describe what the stored record contains; the effective state describes what the replaying manager does with the sample now.
 
-## logtest reports the rule whatever its level
+A replay that fails or returns no usable answer is `unverified`, never `uncovered`. Infrastructure failure must not be converted into a coverage gap.
 
-The asymmetry that makes verification possible: `wazuh-logtest` is a testing interface, not the alert pipeline, and it reports the matched rule regardless of level. Replaying the exact record from the first section gives what the archive refused to:
+## Replay answers for the manager used now
 
-```text
-**Phase 3: Completed filtering (rules).
-        id: '61100'
-        level: '0'
-        description: 'Windows System informational event'
-```
+The ruleset used for replay may differ from the ruleset that originally wrote the archive. Replaying old data therefore answers "what would this manager do with this sample now?", not necessarily "what did the original manager do then?".
 
-`wazuhcoverage` replays one representative sample per finding for this reason. The verdict appears as the `Effective` line and the effective-coverage table; the archive's own empty `Rule` and `Level` stay beside it, because they are still what the record holds.
+That difference is often useful, but it must remain explicit when rules have been added, removed, re-levelled, or otherwise changed.
 
-## A replay answers for today's manager
+## One sample cannot reproduce stateful rules
 
-The ruleset on the manager being replayed against is not necessarily the ruleset that wrote the archive. Replaying last year's archive answers "would we catch this now", which is usually the more useful question and is not the same question. Rules added, removed, or re-levelled since the archive was written all move the answer.
+Verification is intentionally performed with an isolated replay per finding. This prevents unrelated findings from priming one another inside a shared logtest session.
 
-## logtest sees one event, so frequency rules never fire
+The trade-off is that rules requiring history, such as frequency-based logic that fires only after several matching events, cannot be reproduced from one representative sample. A finding covered only by such logic can therefore replay as `uncovered`.
 
-A rule that only fires on the Nth matching event within a window cannot be reproduced from a single replayed sample, so a finding covered solely by such a rule is reported as `uncovered`.
+The tool prefers this false-negative direction over a shared session that could create a false impression of coverage by allowing unrelated samples to influence each other.
 
-`wazuhcoverage` replays each sample in a session of its own, which is what forces this. The alternative — one shared session, as `send_multiple_logs` provides — would let four superficially similar samples prime a frequency rule so the fifth reports a match production would never produce. Between under-reporting and over-reporting coverage, under-reporting sends somebody to look at a rule and over-reporting closes a real gap, so the isolation is deliberate.
+## Location is preserved; log format is not
 
-## Location decides the decoder, and a pasted log has none
+Wazuh decoder selection can depend on event location. `wazuhcoverage` retains the observed location from the archive and supplies it during replay.
 
-Wazuh's decoder chain consults the event's `location`. Pasting a raw EventChannel record into `wazuh-logtest` by hand resolves it to the `json` decoder rather than `windows_eventchannel`, because the interactive tool has no location to offer — which is why a hand replay can disagree with the archive about which decoder ran.
+The original `log_format` is not present in the archive, so it cannot be recovered reliably. Replay defaults to `syslog`; use `--log-format` when the source requires another format. A wrong format can send the sample through the wrong decoder chain and make the replay result misleading.
 
-`wazuhcoverage` avoids that by carrying `Finding.observed_location` from the archive and reporting it on replay. A finding spanning several locations reports one of them, the same compromise already made for the decoder.
+See [CLI.md](CLI.md#manager-replay) for the command-line behaviour.
 
-## Log format cannot be recovered from the archive
+## Archives must exist before they can be analysed
 
-`archives.json` does not record the `log_format` that analysisd was given, so a replay cannot derive it. The default is `syslog`, matching `wazuh-logtest`'s own, and an EventChannel or JSON source replayed as `syslog` resolves against the wrong decoder chain and gives a wrong answer. Pass `--log-format json` for a JSON source.
+`wazuhcoverage` works from Wazuh JSON archives, not from `alerts.json`. Wazuh does not archive all events unless event archiving is enabled.
 
-Deriving the value from the decoder name was considered and rejected: the mapping belongs to Wazuh rather than to this package, and a wrong guess would be indistinguishable from a real result.
+Configuration and storage details belong to the upstream [Archiving event logs](https://documentation.wazuh.com/current/user-manual/manager/event-logging.html#archiving-event-logs) documentation.
 
-## archives.json only exists if you asked for it
+## Raising a level-0 rule changes more than the archive
 
-Coverage analysis needs the archive, and Wazuh does not write one by default. `<logall_json>yes</logall_json>` in the manager's `ossec.conf` turns it on. Without it there is only `alerts.json`, which by construction contains nothing that failed to alert — that is, none of what a coverage report is about.
+Overriding a level-0 rule to a positive level can make rule information visible in the archive and may simplify coverage analysis, but it also changes Wazuh rule-processing behaviour.
 
-## Raising a level-0 rule has side effects
+In particular, it can affect fired counters and correlation paths that depend on prior rule matches. Treat such an override as a ruleset change, not as a reporting-only adjustment, and validate it with `wazuh-logtest`.
 
-Where a level-0 rule dominates a log type and you control its child chain, `<rule id="61100" level="1" overwrite="yes">` restores rule information to the archive and collapses those events into a single `below_threshold` finding rather than one finding per message shape.
+## Template grouping is lossy by design
 
-It is not free. The override makes the event an alert internally, so it increments the rule's fired counters, and it changes what correlation rules keyed on that rule see through `if_matched_sid` and the last-events list. Apply it to rules whose child chain you own, and check the result with `wazuh-logtest` rather than assuming.
+For `no_decoder` and `no_alerting_rule`, findings are grouped by log type and message shape. Messages that share a positional shape but differ semantically can still be merged.
+
+The representative sample remains a real source log, so grouping never removes the ability to inspect or replay an example. The miner's tuning, determinism rules, and measured trade-offs are documented in [design-notes.md](design-notes.md#template-mining).
+
+## Wazuh references
+
+Use the upstream documentation for Wazuh behaviour and configuration:
+
+- [Archiving event logs](https://documentation.wazuh.com/current/user-manual/manager/event-logging.html#archiving-event-logs)
+- [wazuh-logtest tool reference](https://documentation.wazuh.com/current/user-manual/reference/tools/wazuh-logtest.html)
+- [wazuh-logtest development reference](https://documentation.wazuh.com/current/development/wazuh-logtest.html)
+- [rule_test configuration](https://documentation.wazuh.com/current/user-manual/reference/ossec-conf/rule-test.html#reference-ossec-rule-test)
+- [wazuh-analysisd](https://documentation.wazuh.com/current/user-manual/reference/daemons/wazuh-analysisd.html#wazuh-analysisd)
+- [How Wazuh log data collection works](https://documentation.wazuh.com/current/user-manual/capabilities/log-data-collection/how-it-works.html)
