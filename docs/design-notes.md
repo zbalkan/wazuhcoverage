@@ -10,11 +10,43 @@ The cause is in `analysisd`, and it is a matter of ordering rather than omission
 
 A level-0 match, a suppressed match, and a genuine non-match therefore all reach `archives.json` as the same rule-less record, and nothing else in that record separates them. The behaviour was read from Wazuh v4.12.0 and has been stable across the 4.x line; re-check it before relying on this wording against a later major version.
 
-This is a limit on the data, not a defect this tool can repair. Three consequences follow, and all three are deliberate:
+The data cannot be repaired after the fact, but it can be asked again. `wazuh-logtest` is a testing interface rather than the alert pipeline: it reports the rule it matched whatever that rule's level is, so a replay recovers the distinction analysisd discarded. That is what `verify_findings()` and `--logtest` do, and the next section covers what they can and cannot answer.
+
+For a report without a manager, three consequences follow, and all three are deliberate:
 
 The bucket is named for what the record proves — no alerting rule was attached — rather than for the stronger claim that no rule was evaluated. The report prints a note beside the findings whenever the bucket holds events, because an empty `Rule` and `Level` otherwise imply that stronger claim on their own. And no alias is kept for the old `no_rule` name, since an alias would keep the misleading name readable in reports.
 
 `tests/test_analysis_integration.py` pins both the bucket name and the classification of a real archived EventChannel event that logtest resolves to rule `61100` at level 0.
+
+## Verification through logtest
+
+Verification lives in `wazuhcoverage.verification` and nowhere else. `analyze_archive()` opens no socket and gains no parameter for one, so the analysis path stays offline, deterministic, and installable on a laptop; `verify_findings()` is a separate call whose optional dependency a caller that never invokes it never needs.
+
+### One replay per finding
+
+The unit of replay is the finding, not the event. That is what grouping bought: an archive with forty thousand uncovered EventChannel records that mine to fourteen templates costs fourteen round trips, not forty thousand. Findings already carry a deterministic representative sample chosen for exactly this purpose.
+
+### A session per sample
+
+`wazuhtester` offers `send_multiple_logs()`, which shares one daemon session so that frequency and composite rules can fire. That is the wrong primitive here. The samples in a coverage report are unrelated messages from different log families; sharing a session would let four superficially similar samples prime a frequency rule so the fifth reports a match that production would never produce. Reporting coverage that does not exist is worse than reporting none, so each sample is replayed through `send_log()` without a token, which creates and removes a session of its own.
+
+The cost is the opposite blind spot, and it is stated in the README rather than hidden: a rule that only fires on the Nth event cannot be reproduced from one event, so a finding covered solely by such a rule replays as `uncovered`. Both errors were available; the one that under-reports coverage is the one that sends someone to look at a rule, and the one that over-reports it is the one that closes a real gap.
+
+### Location, and what could not be derived
+
+The decoder chain consults `location`, which is why pasting a raw EventChannel record into `wazuh-logtest` by hand resolves it to the JSON decoder rather than `windows_eventchannel`. `Finding` therefore carries `observed_location`, taken from the archive with `any_value()` over the group, and the replay reports it. A finding spanning several locations reports one of them, the same compromise already made for the decoder.
+
+`log_format` could not be handled the same way, because the archive does not record it. It is a parameter with wazuh-logtest's own `syslog` default, and the README says plainly that a JSON or EventChannel source needs the right value passed or its answer is wrong. Deriving it from the decoder name was considered and rejected: the mapping is Wazuh's, not this package's, and a wrong guess would be indistinguishable from a real result.
+
+### Failure is never a gap
+
+A replay that does not produce a usable answer is `unverified`, and `unverified` is never inferred from the archive. A daemon error, a raised exception, an unrecognized status, and a matched rule whose level cannot be read all land there with the reason attached. Turning a broken socket into a coverage gap would send someone to write a rule for an event that is already handled, which is the specific failure this whole feature exists to prevent.
+
+Configuration faults are separated from results. A missing `wazuhtester` or a socket that refuses connections is the same fault for every archive, so the CLI probes once before scanning anything and exits `2`. Discovering it after thirty archives, or printing reports whose effective column is silently absent, would be the expensive way to learn about a typo.
+
+### What a replay is actually answering
+
+The manager replayed against is the one running now. Its ruleset may not be the ruleset that wrote the archive, so a replay of last year's archive answers "would we catch this today". That is usually the more useful question and it is not the same question, which is why the archive's own `Rule` and `Level` fields stay in the report next to the `Effective` line rather than being overwritten by it.
 
 ## Template mining
 
@@ -92,6 +124,8 @@ drain3 is pure Python and imposes no interpreter floor, but version 0.9.11 ships
 The constraint applies only in a shared environment, and only when that environment's own constraints exclude the pinned versions. A project requiring `cachetools>=5` cannot install wazuhcoverage at all; one depending on `google-auth`, whose range is `cachetools>=2,<7`, resolves normally and simply lands on 4.2.1.
 
 Adding a dependency is therefore the thing to be careful about, and `tools/check_dependency_pins.py` exists to enforce that rather than to describe today's tree. It walks the installed graph and fails when an exact pin appears or disappears; CI runs it on every supported interpreter alongside `pip check` and a from-scratch resolution.
+
+`wazuhtester` is an optional extra rather than a dependency, because it requires strictly more than this package does: Linux, Python 3.10 or newer, and a reachable Wazuh manager. Declaring it as a dependency would drop the 3.9 floor, the Windows and macOS support, and the ability to analyze an archive on a laptop, all to serve one flag. The test suite stubs it for the same reason, so CI exercises the mapping logic on every supported interpreter without installing a package half of them cannot have.
 
 DuckDB dropped Python 3.9 in 1.5.0, so the dependency is capped at `duckdb<1.5` on 3.9 through an explicit environment marker. The cap is stated in `pyproject.toml` even though resolvers already honour `Requires-Python`, so a 3.9 install can never silently acquire a DuckDB the package has not been tested against.
 

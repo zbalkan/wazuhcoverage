@@ -56,6 +56,22 @@ class LogTypeCount:
     status_percentage: float
 
 
+# What a replay through wazuh-logtest found, in declared order. These are not
+# the archive's buckets: logtest reports the rule it matched whatever that
+# rule's level is, so the two outcomes an archive cannot separate --
+# "no rule matched" and "a level-0 rule matched" -- arrive here as distinct
+# answers. "unverified" is the honest bucket for a replay that did not produce
+# one, and it is never inferred from the archive.
+EFFECTIVE_STATES = (
+    "no_decoder",
+    "uncovered",
+    "silenced",
+    "below_threshold",
+    "at_or_above_threshold",
+    "unverified",
+)
+
+
 @dataclass(frozen=True)
 class Finding:
     finding_key: str
@@ -67,9 +83,37 @@ class Finding:
     first_seen: Optional[str]
     last_seen: Optional[str]
     observed_decoder: Optional[str]
+    # The archive's location field for this group, which is what a faithful
+    # replay has to report to Wazuh: the decoder chain consults it, so a
+    # sample replayed under the wrong location can resolve to a different
+    # decoder than the one that actually ran.
+    observed_location: Optional[str]
     observed_rule_id: Optional[str]
     observed_rule_level: Optional[int]
     sample_log: str
+
+
+@dataclass(frozen=True)
+class Verification:
+    """What wazuh-logtest made of one finding's representative sample.
+
+    ``effective_state`` is the answer the archive could not give. The rule
+    fields describe the rule logtest matched, which may be a level-0 rule the
+    archive recorded as no rule at all.
+    """
+
+    finding_key: str
+    effective_state: str
+    # The raw LogtestStatus name (RuleMatch, NoRule, NoDecoder, Error), kept so
+    # a caller can tell a daemon error apart from a clean "nothing matched".
+    logtest_status: Optional[str]
+    decoder: Optional[str]
+    rule_id: Optional[str]
+    rule_level: Optional[int]
+    rule_description: Optional[str]
+    rule_groups: tuple[str, ...]
+    # Why the state is "unverified"; None whenever it is not.
+    error: Optional[str]
 
 
 @dataclass(frozen=True)

@@ -49,6 +49,13 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Replaying finding samples through wazuh-logtest. Optional because it needs
+# what this package otherwise does not: Linux, Python 3.10 or newer, and a
+# running Wazuh manager whose logtest socket this user can reach. Everything
+# else keeps working without it.
+logtest = [
+  "wazuhtester>=0.1.0rc1,<1",
+]
 test = [
   "pytest>=8,<10",
 ]

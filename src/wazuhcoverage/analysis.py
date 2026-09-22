@@ -191,9 +191,10 @@ def analyze_archive(
                 first_seen=_string_or_none(row[6]),
                 last_seen=_string_or_none(row[7]),
                 observed_decoder=_string_or_none(row[8]),
-                observed_rule_id=_string_or_none(row[9]),
-                observed_rule_level=int(row[10]) if row[10] is not None else None,
-                sample_log=str(row[11]),
+                observed_location=_string_or_none(row[9]),
+                observed_rule_id=_string_or_none(row[10]),
+                observed_rule_level=int(row[11]) if row[11] is not None else None,
+                sample_log=str(row[12]),
             )
             for row in connection.execute(
                 """
@@ -207,6 +208,7 @@ def analyze_archive(
                     first_seen,
                     last_seen,
                     observed_decoder,
+                    observed_location,
                     observed_rule_id,
                     observed_rule_level,
                     sample_log
@@ -513,6 +515,13 @@ def _create_finding_views(connection: Any) -> None:
                 WHEN n.observed_status = 'below_threshold' THEN NULL
                 ELSE n.decoder_name
             END AS finding_decoder,
+            -- Reported for the same reason the decoder is: a below_threshold
+            -- finding spans whatever sources its rule fired on, so claiming
+            -- one of their locations would be arbitrary.
+            CASE
+                WHEN n.observed_status = 'below_threshold' THEN NULL
+                ELSE n.location
+            END AS finding_location,
             md5(
                 CASE
                     WHEN n.observed_status = 'below_threshold'
@@ -542,6 +551,7 @@ def _create_finding_views(connection: Any) -> None:
             strftime(min(event_timestamp), '%Y-%m-%d %H:%M:%S%z') AS first_seen,
             strftime(max(event_timestamp), '%Y-%m-%d %H:%M:%S%z') AS last_seen,
             any_value(finding_decoder) AS observed_decoder,
+            any_value(finding_location) AS observed_location,
             any_value(rule_id) AS observed_rule_id,
             any_value(rule_level) AS observed_rule_level,
             -- The representative is still the deterministic min() of the raw

@@ -260,7 +260,7 @@ def test_cli_forwards_parsing_mode_to_the_analysis(monkeypatch: pytest.MonkeyPat
         "analyze_archive",
         lambda path, **kwargs: received.append(kwargs) or _analysis(path),
     )
-    monkeypatch.setattr(cli, "render_report", lambda _analysis: "report\n")
+    monkeypatch.setattr(cli, "render_report", lambda _analysis, _verifications=(): "report\n")
 
     assert cli.main(["--strict", str(archive)]) == 0
     assert received == [{"alert_threshold": 3, "skip_malformed": False}]
@@ -285,6 +285,7 @@ def _analysis(path: Path) -> ArchiveAnalysis:
                 first_seen=None,
                 last_seen=None,
                 observed_decoder="sshd",
+                observed_location="syslog",
                 observed_rule_id=None,
                 observed_rule_level=None,
                 sample_log="raw sample",
@@ -343,7 +344,7 @@ def test_ignore_history_processes_hit_and_retains_history(monkeypatch: pytest.Mo
         "analyze_archive",
         lambda path, **_kwargs: analyzed.append(path) or _analysis(path),
     )
-    monkeypatch.setattr(cli, "render_report", lambda _analysis: "report\n")
+    monkeypatch.setattr(cli, "render_report", lambda _analysis, _verifications=(): "report\n")
 
     assert cli.main(["--ignore-history", str(archive)]) == 0
     assert analyzed == [archive]
@@ -429,6 +430,7 @@ def test_no_stats_emits_exactly_one_row_per_finding(monkeypatch: pytest.MonkeyPa
             first_seen=None,
             last_seen=None,
             observed_decoder=None,
+            observed_location="syslog",
             observed_rule_id=None,
             observed_rule_level=None,
             sample_log="another raw sample",
@@ -447,3 +449,79 @@ def test_no_stats_emits_exactly_one_row_per_finding(monkeypatch: pytest.MonkeyPa
     # count and the finding count must agree exactly.
     assert captured.out.splitlines() == ["raw sample", "another raw sample"]
     assert len(captured.out.splitlines()) == len(analysis.findings)
+
+
+def test_logtest_joins_the_short_flag_cluster() -> None:
+    parser = cli.build_parser()
+
+    expected = vars(parser.parse_args(["-i", "-n", "-s", "-l", "a.json"]))
+    for cluster in ("-insl", "-lsni", "-sil", "-nl"):
+        merged = vars(parser.parse_args([cluster, "a.json"]))
+        assert all(merged[flag] for flag in _flags_in(cluster))
+
+    assert vars(parser.parse_args(["-insl", "a.json"])) == expected
+    assert parser.parse_args(["a.json"]).logtest is False
+
+
+def _flags_in(cluster: str) -> list[str]:
+    names = {"i": "ignore_history", "n": "no_stats", "s": "strict", "l": "logtest"}
+    return [names[letter] for letter in cluster.lstrip("-")]
+
+
+def test_logtest_options_have_documented_defaults() -> None:
+    args = cli.build_parser().parse_args(["a.json"])
+
+    assert args.log_format == "syslog"
+    assert args.logtest_socket is None
+
+
+def test_an_unreachable_daemon_stops_before_any_archive_is_read(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys
+) -> None:
+    # Scanning thirty archives and only then failing on a socket that was
+    # never going to answer is the expensive way to learn about a typo.
+    archive = tmp_path / "archive.json.gz"
+    archive.touch()
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cli, "resolve_targets", lambda _targets: [archive])
+    monkeypatch.setattr(cli, "analyze_archive", lambda *_args, **_kwargs: pytest.fail("must not scan"))
+    monkeypatch.setattr(cli, "_check_logtest", _refuse_logtest)
+
+    assert cli.main(["--logtest", str(archive)]) == 2
+    assert "not accepting connections" in capsys.readouterr().err
+
+
+def _refuse_logtest(_socket_path) -> None:
+    raise RuntimeError("the wazuh-logtest socket at /var/ossec/queue/sockets/logtest is not accepting connections.")
+
+
+def test_logtest_options_reach_the_verifier(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys) -> None:
+    archive = tmp_path / "archive.json.gz"
+    archive.touch()
+    received: list[dict] = []
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cli, "resolve_targets", lambda _targets: [archive])
+    monkeypatch.setattr(cli, "analyze_archive", lambda path, **_kwargs: _analysis(Path(path)))
+    monkeypatch.setattr(cli, "_check_logtest", lambda _socket_path: None)
+    monkeypatch.setattr(cli, "verify_findings", lambda analysis, **kwargs: received.append(kwargs) or ())
+    monkeypatch.setattr(cli, "render_report", lambda _analysis, _verifications=(): "report\n")
+
+    assert cli.main(["--logtest", "--log-format", "json", "--logtest-socket", "/tmp/s", str(archive)]) == 0
+    assert received == [{"alert_threshold": 3, "log_format": "json", "socket_path": "/tmp/s"}]
+    capsys.readouterr()
+
+
+def test_without_logtest_nothing_is_replayed(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys) -> None:
+    archive = tmp_path / "archive.json.gz"
+    archive.touch()
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cli, "resolve_targets", lambda _targets: [archive])
+    monkeypatch.setattr(cli, "analyze_archive", lambda path, **_kwargs: _analysis(Path(path)))
+    monkeypatch.setattr(cli, "_check_logtest", lambda _socket_path: pytest.fail("must not probe the daemon"))
+    monkeypatch.setattr(cli, "verify_findings", lambda *_args, **_kwargs: pytest.fail("must not replay"))
+
+    assert cli.main(["--no-stats", str(archive)]) == 0
+    capsys.readouterr()

@@ -1,7 +1,7 @@
 from dataclasses import replace
 from pathlib import Path
 
-from wazuhcoverage import ArchiveAnalysis, Finding, LogTypeCount, StatusCount
+from wazuhcoverage import ArchiveAnalysis, Finding, LogTypeCount, StatusCount, Verification
 from wazuhcoverage.report import render_report
 
 
@@ -129,6 +129,7 @@ def test_finding_fields_stay_on_one_row_each() -> None:
                 first_seen=None,
                 last_seen=None,
                 observed_decoder=None,
+                observed_location="syslog",
                 observed_rule_id=None,
                 observed_rule_level=None,
                 sample_log="Exception in thread main at com.acme.Foo.bar",
@@ -181,6 +182,7 @@ def test_a_long_sample_is_never_wrapped_or_padded() -> None:
                 first_seen=None,
                 last_seen=None,
                 observed_decoder="sshd",
+                observed_location="syslog",
                 observed_rule_id=None,
                 observed_rule_level=None,
                 sample_log=sample,
@@ -225,3 +227,130 @@ def test_the_caveat_is_omitted_when_the_bucket_is_empty() -> None:
     )
 
     assert "Note:" not in render_report(analysis)
+
+
+def _verified_analysis() -> ArchiveAnalysis:
+    return replace(
+        _analysis(),
+        findings=(
+            Finding(
+                finding_key="silenced",
+                observed_status="no_alerting_rule",
+                log_type="windows_eventchannel",
+                message_pattern="pattern",
+                event_count=40,
+                affected_agents=1,
+                first_seen=None,
+                last_seen=None,
+                observed_decoder="windows_eventchannel",
+                observed_location="EventChannel",
+                observed_rule_id=None,
+                observed_rule_level=None,
+                sample_log="a windows record",
+            ),
+            Finding(
+                finding_key="gap",
+                observed_status="no_alerting_rule",
+                log_type="sshd",
+                message_pattern="pattern",
+                event_count=10,
+                affected_agents=1,
+                first_seen=None,
+                last_seen=None,
+                observed_decoder="sshd",
+                observed_location="syslog",
+                observed_rule_id=None,
+                observed_rule_level=None,
+                sample_log="an sshd record",
+            ),
+        ),
+    )
+
+
+def _verifications() -> tuple[Verification, ...]:
+    return (
+        Verification(
+            finding_key="silenced",
+            effective_state="silenced",
+            logtest_status="RuleMatch",
+            decoder="windows_eventchannel",
+            rule_id="61100",
+            rule_level=0,
+            rule_description="Windows System informational event",
+            rule_groups=("windows", "windows_system"),
+            error=None,
+        ),
+        Verification(
+            finding_key="gap",
+            effective_state="uncovered",
+            logtest_status="NoRule",
+            decoder="sshd",
+            rule_id=None,
+            rule_level=None,
+            rule_description=None,
+            rule_groups=(),
+            error=None,
+        ),
+    )
+
+
+def test_a_verified_report_names_the_rule_the_archive_omitted() -> None:
+    text = render_report(_verified_analysis(), _verifications())
+
+    assert "Effective: silenced (rule 61100, level 0)" in text
+    assert "Matched: Windows System informational event" in text
+    assert "Effective: uncovered (rule -, level -)" in text
+
+
+def test_the_effective_table_weights_states_by_events() -> None:
+    # One finding standing for 40 events and one standing for 10 are not the
+    # same coverage statement, so the table counts events as well as findings.
+    lines = render_report(_verified_analysis(), _verifications()).splitlines()
+    header = lines.index("Effective coverage (wazuh-logtest)")
+    rows = [line.split() for line in lines[header + 3 : header + 5]]
+
+    assert rows[0] == ["uncovered", "1", "10", "20.00%"]
+    assert rows[1] == ["silenced", "1", "40", "80.00%"]
+
+
+def test_a_verified_report_drops_the_note_it_has_answered() -> None:
+    # The note exists because the archive cannot separate silenced from
+    # uncovered. Once a replay has, repeating it would be noise.
+    assert "Note:" not in render_report(_verified_analysis(), _verifications())
+    assert "Note:" in render_report(_verified_analysis())
+
+
+def test_an_unverified_finding_says_why() -> None:
+    verifications = (
+        Verification(
+            finding_key="gap",
+            effective_state="unverified",
+            logtest_status="Error",
+            decoder=None,
+            rule_id=None,
+            rule_level=None,
+            rule_description=None,
+            rule_groups=(),
+            error="the logtest daemon reported an error for this sample",
+        ),
+    )
+
+    text = render_report(_verified_analysis(), verifications)
+
+    assert "Effective: unverified" in text
+    assert "Replay: the logtest daemon reported an error for this sample" in text
+    # The finding that was not replayed carries no verdict at all rather than
+    # a blank one.
+    assert text.count("Effective:") == 1
+
+
+def test_an_unverified_report_is_unchanged() -> None:
+    assert render_report(_verified_analysis()) == render_report(_verified_analysis(), ())
+    assert "Effective coverage" not in render_report(_verified_analysis())
+
+
+def test_a_verified_report_is_still_plain_ascii() -> None:
+    text = render_report(_verified_analysis(), _verifications())
+
+    assert "\x1b" not in text
+    assert text.isascii()

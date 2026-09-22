@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Optional
 
-from wazuhcoverage.models import STATUSES, ArchiveAnalysis
+from wazuhcoverage.models import EFFECTIVE_STATES, STATUSES, ArchiveAnalysis, Verification
 
 _STATUS_WIDTH = 24
 _LOG_TYPE_WIDTH = 32
@@ -14,14 +15,20 @@ _STATUS_COUNT_WIDTHS = {status: max(12, len(status) + 2) for status in STATUSES}
 # The one bucket whose meaning the archive underdetermines; see
 # wazuhcoverage.models.STATUSES for why.
 _AMBIGUOUS_STATUS = "no_alerting_rule"
+_EFFECTIVE_WIDTH = max(24, max(len(state) for state in EFFECTIVE_STATES) + 2)
 
 
-def render_report(analysis: ArchiveAnalysis) -> str:
+def render_report(analysis: ArchiveAnalysis, verifications: Sequence[Verification] = ()) -> str:
     """Render a compact human-readable report for one archive.
 
     The first table ranks status buckets by event count. The second pivots the
     status/log-type cells into one row per log type and ranks those rows by
     aggregate event count.
+
+    ``verifications`` are optional wazuh-logtest replays. When present they add
+    an effective-coverage table and an ``Effective`` line to each finding they
+    cover, and they suppress the note about what an absent rule cannot prove,
+    because a replay has since answered that question.
     """
 
     lines: list[str] = [
@@ -67,10 +74,15 @@ def render_report(analysis: ArchiveAnalysis) -> str:
             )
         )
 
+    by_key = {item.finding_key: item for item in verifications}
+    lines.extend(_effective_table(analysis, by_key))
+
     lines.extend(["", f"Findings: {len(analysis.findings):,}", ""])
-    lines.extend(_no_alerting_rule_note(analysis))
+    if not by_key:
+        lines.extend(_no_alerting_rule_note(analysis))
 
     for index, finding in enumerate(analysis.findings, start=1):
+        verification = by_key.get(finding.finding_key)
         lines.extend(
             [
                 f"[{index}] {finding.observed_status} | {finding.log_type or '-'}",
@@ -83,11 +95,80 @@ def render_report(analysis: ArchiveAnalysis) -> str:
                 f"    Level: {finding.observed_rule_level if finding.observed_rule_level is not None else '-'}",
                 f"    Pattern: {_single_row(finding.message_pattern)}",
                 f"    Sample: {finding.sample_log}",
-                "",
             ]
         )
+        lines.extend(_finding_verdict(verification))
+        lines.append("")
 
     return "\n".join(lines).rstrip() + "\n"
+
+
+def _effective_table(analysis: ArchiveAnalysis, by_key: dict[str, Verification]) -> list[str]:
+    """Rank the replayed verdicts by how many events each one accounts for.
+
+    Findings are weighted by ``event_count`` rather than counted, because one
+    finding standing for 40,000 events and one standing for three are not the
+    same coverage statement. Only replayed findings appear, so the total is the
+    events those findings cover and not the archive's.
+    """
+
+    if not by_key:
+        return []
+
+    events: dict[str, int] = {}
+    findings: dict[str, int] = {}
+    for finding in analysis.findings:
+        verification = by_key.get(finding.finding_key)
+        if verification is None:
+            continue
+        events[verification.effective_state] = events.get(verification.effective_state, 0) + finding.event_count
+        findings[verification.effective_state] = findings.get(verification.effective_state, 0) + 1
+
+    covered = sum(events.values())
+    rows = [
+        "",
+        "Effective coverage (wazuh-logtest)",
+        "----------------------------------",
+        _effective_row("State", "Findings", "Events", "% replayed"),
+    ]
+    rows.extend(
+        _effective_row(
+            state,
+            f"{findings.get(state, 0):,}",
+            f"{events.get(state, 0):,}",
+            _percent(_percentage(events.get(state, 0), covered)),
+        )
+        for state in EFFECTIVE_STATES
+        if findings.get(state, 0)
+    )
+    return rows
+
+
+def _finding_verdict(verification: Optional[Verification]) -> list[str]:
+    """Render one finding's replay result, or nothing when it was not replayed."""
+
+    if verification is None:
+        return []
+
+    rule = verification.rule_id or "-"
+    level = verification.rule_level if verification.rule_level is not None else "-"
+    rows = [f"    Effective: {verification.effective_state} (rule {rule}, level {level})"]
+
+    if verification.rule_description:
+        rows.append(f"    Matched: {_single_row(verification.rule_description)}")
+    if verification.error:
+        rows.append(f"    Replay: {_single_row(verification.error)}")
+    return rows
+
+
+def _effective_row(state: str, findings: str, events: str, percentage: str) -> str:
+    cells = [
+        f"{state:<{_EFFECTIVE_WIDTH}}",
+        f"{findings:>12}",
+        f"{events:>{_COUNT_WIDTH}}",
+        f"{percentage:>12}",
+    ]
+    return "".join(cells).rstrip()
 
 
 def _no_alerting_rule_note(analysis: ArchiveAnalysis) -> list[str]:
