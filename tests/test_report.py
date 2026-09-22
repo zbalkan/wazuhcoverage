@@ -59,38 +59,103 @@ def _analysis() -> ArchiveAnalysis:
 
 def _rendered_log_type_rows(analysis: ArchiveAnalysis) -> list[str]:
     lines = render_report(analysis).splitlines()
-    header = next(
-        index for index, line in enumerate(lines) if line.startswith("Log type") and "at_or_above_threshold" in line
-    )
+    header = next(index for index, line in enumerate(lines) if line.startswith("Log type") and "Processed" in line)
     end = lines.index("", header + 1)
     return lines[header + 1 : end]
 
 
-def test_report_renders_status_and_log_type_tables() -> None:
+def _rendered_outcome_rows(analysis: ArchiveAnalysis) -> list[str]:
+    lines = render_report(analysis).splitlines()
+    header = next(index for index, line in enumerate(lines) if line.startswith("Outcome") and "% dropped" in line)
+    end = lines.index("", header + 1)
+    return lines[header + 1 : end]
+
+
+def test_report_renders_outcome_and_log_type_tables() -> None:
     lines = render_report(_analysis()).splitlines()
 
-    assert "Status                          Events   % total" in lines
-    assert lines[lines.index("Status") + 3].split() == ["no_decoder", "3", "30.00%"]
+    header = next(line for line in lines if line.startswith("Outcome") and "% dropped" in line)
+    assert header.split() == ["Outcome", "Events", "%", "total", "%", "dropped"]
 
-    header = next(line for line in lines if line.startswith("Log type") and "at_or_above_threshold" in line)
-    assert header.split() == [
+    log_types = next(line for line in lines if line.startswith("Log type") and "Processed" in line)
+    assert log_types.split() == [
         "Log",
         "type",
         "Events",
         "%",
         "total",
+        "Processed",
+        "Dropped",
         "no_decoder",
         "no_alerting_rule",
         "below_threshold",
-        "at_or_above_threshold",
     ]
+
+
+def test_the_outcome_table_splits_the_archive_into_processed_and_dropped() -> None:
+    # at_or_above_threshold is the only bucket that reached an alert, so it is
+    # the whole of Processed and the other three are the whole of Dropped.
+    rows = [row.split() for row in _rendered_outcome_rows(_analysis())]
+
+    assert rows[0] == ["Processed", "(at_or_above_threshold)", "3", "30.00%", "-"]
+    assert rows[1] == ["Dropped", "7", "70.00%", "100.00%"]
+    assert [row[0] for row in rows[2:]] == ["no_decoder", "no_alerting_rule", "below_threshold"]
+
+
+def test_the_dropped_buckets_sum_back_to_the_dropped_total() -> None:
+    rows = [row.split() for row in _rendered_outcome_rows(_analysis())]
+
+    assert sum(int(row[1]) for row in rows[2:]) == int(rows[1][1])
+    assert int(rows[0][2]) + int(rows[1][1]) == 10
+
+
+def test_a_dropped_bucket_is_sized_against_the_dropped_events() -> None:
+    # 3 of 7 dropped events, not 3 of 10 archived ones: a bucket holding a few
+    # per cent of a well-covered archive can still be most of what is left.
+    rows = [row.split() for row in _rendered_outcome_rows(_analysis())]
+
+    assert rows[2] == ["no_decoder", "3", "30.00%", "42.86%"]
+    assert rows[4] == ["below_threshold", "1", "10.00%", "14.29%"]
+
+
+def test_the_dropped_share_is_blank_when_nothing_was_dropped() -> None:
+    # A column of 0.00% would read as a measurement rather than an empty set.
+    analysis = replace(
+        _analysis(),
+        total_events=3,
+        status_counts=(
+            StatusCount(status="at_or_above_threshold", event_count=3, percentage=100.0),
+            StatusCount(status="no_decoder", event_count=0, percentage=0.0),
+            StatusCount(status="no_alerting_rule", event_count=0, percentage=0.0),
+            StatusCount(status="below_threshold", event_count=0, percentage=0.0),
+        ),
+    )
+
+    rows = [row.split() for row in _rendered_outcome_rows(analysis)]
+
+    assert rows[1] == ["Dropped", "0", "0.00%", "-"]
+    assert [row[-1] for row in rows[2:]] == ["-", "-", "-"]
+
+
+def test_every_bucket_is_listed_even_at_zero() -> None:
+    analysis = replace(
+        _analysis(),
+        status_counts=tuple(
+            replace(item, event_count=0, percentage=0.0) if item.status == "below_threshold" else item
+            for item in _analysis().status_counts
+        ),
+    )
+
+    rows = [row.split() for row in _rendered_outcome_rows(analysis)]
+
+    assert rows[-1][:2] == ["below_threshold", "0"]
 
 
 def test_log_type_table_groups_statuses_into_one_row_per_type() -> None:
     rows = _rendered_log_type_rows(_analysis())
 
     sshd = next(row for row in rows if row.startswith("sshd"))
-    assert sshd.split() == ["sshd", "6", "60.00%", "0", "2", "1", "3"]
+    assert sshd.split() == ["sshd", "6", "60.00%", "3", "3", "0", "2", "1"]
 
 
 def test_log_type_table_is_sorted_by_aggregate_event_count() -> None:
@@ -103,7 +168,7 @@ def test_report_renders_a_missing_log_type_as_a_dash() -> None:
     rows = _rendered_log_type_rows(_analysis())
 
     missing = next(row for row in rows if row.lstrip().startswith("-"))
-    assert missing.split() == ["-", "1", "10.00%", "0", "1", "0", "0"]
+    assert missing.split() == ["-", "1", "10.00%", "0", "1", "0", "1", "0"]
     assert not any("None" in row for row in rows)
 
 

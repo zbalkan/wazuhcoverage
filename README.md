@@ -160,20 +160,21 @@ Archive: /archives/2026/09/archive.json.gz
 Total events: 8
 Malformed lines skipped: 0
 
-Status
-------
-Status                          Events   % total
-no_decoder                           3    37.50%
-no_alerting_rule                     2    25.00%
-at_or_above_threshold                2    25.00%
-below_threshold                      1    12.50%
+Outcome
+-------
+Outcome                                    Events   % total   % dropped
+Processed (at_or_above_threshold)               2    25.00%           -
+Dropped                                         6    75.00%     100.00%
+  no_decoder                                    3    37.50%      50.00%
+  no_alerting_rule                              2    25.00%      33.33%
+  below_threshold                               1    12.50%      16.67%
 
 Log types
 ---------
-Log type                                Events   % total  no_decoder  no_alerting_rule  below_threshold  at_or_above_threshold
-sshd                                         4    50.00%           0                 1                1                      2
-/var/log/app.log                             3    37.50%           3                 0                0                      0
-windows                                      1    12.50%           0                 1                0                      0
+Log type                                Events   % total   Processed     Dropped  no_decoder  no_alerting_rule  below_threshold
+sshd                                         4    50.00%           2           2           0                 1                1
+/var/log/app.log                             3    37.50%           0           3           3                 0                0
+windows                                      1    12.50%           0           1           0                 1                0
 
 Findings: 2
 
@@ -205,22 +206,28 @@ Note: a no_alerting_rule event carries no rule in the archive. Wazuh writes that
     Sample: Sep 18 10:02:30 host sshd[2201]: Accepted publickey for ops from 10.0.0.9 port 51022 ssh2
 ```
 
-The **Status** table tells you how much of the archive the ruleset acted on. The **Log types** table tells you where the gaps live: it ranks each decoder or source by volume and breaks it down across the same four buckets, so a row's four counts add up to its `Events`. Every bucket is listed even at zero, because an empty bucket is a coverage statement rather than missing data.
+The **Outcome** table answers the coverage question in two rows before it explains anything. An event was either processed — a rule fired on it at or above the alert threshold, which is the one outcome that reaches an alert — or it was dropped, and the three indented rows say why. They are the same buckets the API reports as `observed_status`, so `Processed` is exactly `at_or_above_threshold` and the indented three are exactly the rest; the report names the bucket next to `Processed` rather than leaving that mapping to this page. The three sum back to `Dropped`, and `Processed` plus `Dropped` is `Total events`.
 
-`% total` is the share of `Total events`, which excludes malformed lines. Log types are ranked by volume, ties broken by name, and equal status counts keep the declared bucket order, so two runs over the same archive render identically.
+`% total` is the share of `Total events`, which excludes malformed lines, while `% dropped` is the share of the dropped events alone. The second column is what ranks the work: a bucket holding four per cent of an archive that is ninety-five per cent covered is most of what remains, and `% total` alone makes it look negligible. It reads `-` on the `Processed` row, which is not part of that denominator, and on every row of an archive that dropped nothing, where a column of `0.00%` would read as a measurement rather than an empty set.
+
+The **Log types** table tells you where the gaps live: it ranks each decoder or source by volume, splits it across the same two outcomes, and then breaks the dropped column into its three buckets. A row's `Processed` and `Dropped` add up to its `Events`, and its last three columns add up to its `Dropped`. Every bucket is listed even at zero, because an empty bucket is a coverage statement rather than missing data.
+
+Log types are ranked by volume, ties broken by name, and equal status counts keep the declared bucket order, so two runs over the same archive render identically.
 
 Each **finding** is one group of uncovered events with a representative line. `Pattern` is the shape the group was mined down to, with `<*>` where values varied; `Sample` is a real line from the archive, ready to replay. `Affected agents` is how many distinct agents contributed, which separates a single noisy host from a fleet-wide gap. Nothing is ever truncated or wrapped — a long log type or sample widens its row instead — and the output is plain ASCII with no colour codes, so it survives redirection and a Windows code page.
 
 ## Classification
 
-Every event lands in exactly one bucket, and the counts add up to the event total.
+Every event lands in exactly one bucket, and the counts add up to the event total. The report groups those four buckets into two outcomes; the bucket names are what the API returns and what the tables below use.
 
-| Bucket | Meaning | Typical action |
-| --- | --- | --- |
-| `no_decoder` | Nothing decoded the event. | Write or fix a decoder; check the log format reaching the agent. |
-| `no_alerting_rule` | It decoded, but the archive records no rule. | Replay the sample; see below. |
-| `below_threshold` | A rule fired below the alert threshold. | Decide whether that rule should be raised, or accept it as tuned. |
-| `at_or_above_threshold` | A rule fired at or above the threshold. | Covered. |
+| Outcome | Bucket | Meaning | Typical action |
+| --- | --- | --- | --- |
+| Processed | `at_or_above_threshold` | A rule fired at or above the threshold. | Covered. |
+| Dropped | `no_decoder` | Nothing decoded the event. | Write or fix a decoder; check the log format reaching the agent. |
+| Dropped | `no_alerting_rule` | It decoded, but the archive records no rule. | Replay the sample; see below. |
+| Dropped | `below_threshold` | A rule fired below the alert threshold. | Decide whether that rule should be raised, or accept it as tuned. |
+
+`Dropped` names what the alert pipeline did with the event, not what the archive did: all four buckets are archived records, and a dropped event is one that produced no alert. `below_threshold` is dropped in that sense while having been decoded and matched, which is why the breakdown matters more than the total — one of those three rows is a tuning decision someone already made, and the other two are usually gaps.
 
 The CLI uses an alert threshold of 3. The library takes an `alert_threshold` argument if your `<log_alert_level>` differs. A rule with a missing or unparseable level counts as `below_threshold`, because it cannot be shown to meet the threshold.
 
@@ -318,7 +325,7 @@ for finding in analysis.findings:
 | `Finding` | `finding_key`, `observed_status`, `log_type`, `message_pattern`, `event_count`, `affected_agents`, `first_seen`, `last_seen`, `observed_decoder`, `observed_location`, `observed_rule_id`, `observed_rule_level`, `sample_log` |
 | `Verification` | `finding_key`, `effective_state`, `logtest_status`, `decoder`, `rule_id`, `rule_level`, `rule_description`, `rule_groups`, `error` |
 
-`STATUSES` names the archive's buckets and `EFFECTIVE_STATES` names the replay verdicts. They are separate because they answer different questions: one reports what the record holds, the other what the manager does.
+`STATUSES` names the archive's buckets and `EFFECTIVE_STATES` names the replay verdicts. They are separate because they answer different questions: one reports what the record holds, the other what the manager does. `PROCESSED_STATUS` and `DROPPED_STATUSES` are the report's two-outcome grouping over `STATUSES`, exported so a caller can reproduce the split without hardcoding the bucket name; no model field changes with it, and `observed_status` keeps naming the exact bucket.
 
 All models are frozen dataclasses and every collection is a tuple, so a result can be cached or shared without defensive copying. `LogTypeCount.percentage` is the pair's share of the whole archive; `status_percentage` is its share of that one bucket, which ranks a log type inside a small bucket that a whole-archive percentage would flatten to nothing. The package is `py.typed`, and annotations resolve under `typing.get_type_hints()` on every supported interpreter.
 

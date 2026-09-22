@@ -31,6 +31,15 @@ STATUSES = (
     "at_or_above_threshold",
 )
 
+# The two outcomes the report groups those buckets into. An event either
+# reached an alerting rule at or above the threshold, which is the only
+# outcome the alert pipeline acts on, or it did not. The three ways it can
+# fail to are what a coverage gap is diagnosed from, so the grouping is a
+# presentation layer over STATUSES and never replaces it: observed_status
+# keeps naming the exact bucket on every model, and the counts are unchanged.
+PROCESSED_STATUS = "at_or_above_threshold"
+DROPPED_STATUSES = tuple(status for status in STATUSES if status != PROCESSED_STATUS)
+
 
 @dataclass(frozen=True)
 class StatusCount:

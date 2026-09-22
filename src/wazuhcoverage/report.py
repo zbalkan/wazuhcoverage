@@ -5,13 +5,30 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Optional
 
-from wazuhcoverage.models import EFFECTIVE_STATES, STATUSES, ArchiveAnalysis, Verification
+from wazuhcoverage.models import (
+    DROPPED_STATUSES,
+    EFFECTIVE_STATES,
+    PROCESSED_STATUS,
+    ArchiveAnalysis,
+    Verification,
+)
 
-_STATUS_WIDTH = 24
+_PROCESSED_LABEL = "Processed"
+_DROPPED_LABEL = "Dropped"
+# The processed row names its bucket inline. The dropped rows name theirs by
+# being the bucket, so this is the only row that would otherwise leave a reader
+# unable to map the report back to the observed_status values the API returns.
+_PROCESSED_OUTCOME = f"{_PROCESSED_LABEL} ({PROCESSED_STATUS})"
+_OUTCOME_WIDTH = max(24, len(_PROCESSED_OUTCOME) + 2)
 _LOG_TYPE_WIDTH = 32
 _COUNT_WIDTH = 14
 _PERCENT_WIDTH = 10
-_STATUS_COUNT_WIDTHS = {status: max(12, len(status) + 2) for status in STATUSES}
+_DROPPED_PERCENT_WIDTH = 12
+# One column per outcome, then the breakdown of the dropped one. The two
+# aggregates come first so a row can be read for coverage alone; the three
+# that follow say why the dropped share was dropped and sum back to it.
+_LOG_TYPE_COLUMNS = (_PROCESSED_LABEL, _DROPPED_LABEL) + DROPPED_STATUSES
+_LOG_TYPE_COLUMN_WIDTHS = {column: max(12, len(column) + 2) for column in _LOG_TYPE_COLUMNS}
 # The one bucket whose meaning the archive underdetermines; see
 # wazuhcoverage.models.STATUSES for why.
 _AMBIGUOUS_STATUS = "no_alerting_rule"
@@ -21,7 +38,9 @@ _EFFECTIVE_WIDTH = max(24, max(len(state) for state in EFFECTIVE_STATES) + 2)
 def render_report(analysis: ArchiveAnalysis, verifications: Sequence[Verification] = ()) -> str:
     """Render a compact human-readable report for one archive.
 
-    The first table ranks status buckets by event count. The second pivots the
+    The first table splits the archive into the two outcomes that matter --
+    processed and dropped -- and breaks the dropped share into the three
+    buckets that explain it, ranked by event count. The second pivots the
     status/log-type cells into one row per log type and ranks those rows by
     aggregate event count.
 
@@ -36,19 +55,12 @@ def render_report(analysis: ArchiveAnalysis, verifications: Sequence[Verificatio
         f"Total events: {analysis.total_events:,}",
         f"Malformed lines skipped: {analysis.malformed_lines:,}",
         "",
-        "Status",
-        "------",
-        _status_row("Status", "Events", "% total"),
+        "Outcome",
+        "-------",
+        _outcome_row("Outcome", "Events", "% total", "% dropped"),
     ]
 
-    for status in analysis.status_counts:
-        lines.append(
-            _status_row(
-                status.status,
-                f"{status.event_count:,}",
-                _percent(status.percentage),
-            )
-        )
+    lines.extend(_outcome_table(analysis))
 
     lines.extend(
         [
@@ -59,7 +71,7 @@ def render_report(analysis: ArchiveAnalysis, verifications: Sequence[Verificatio
                 "Log type",
                 "Events",
                 "% total",
-                {status: status for status in STATUSES},
+                {column: column for column in _LOG_TYPE_COLUMNS},
             ),
         ]
     )
@@ -70,7 +82,7 @@ def render_report(analysis: ArchiveAnalysis, verifications: Sequence[Verificatio
                 log_type or "-",
                 f"{event_count:,}",
                 _percent(_percentage(event_count, analysis.total_events)),
-                {status: f"{status_counts.get(status, 0):,}" for status in STATUSES},
+                _log_type_cells(status_counts),
             )
         )
 
@@ -101,6 +113,70 @@ def render_report(analysis: ArchiveAnalysis, verifications: Sequence[Verificatio
         lines.append("")
 
     return "\n".join(lines).rstrip() + "\n"
+
+
+def _outcome_table(analysis: ArchiveAnalysis) -> list[str]:
+    """Render the archive as two outcomes, with the dropped one broken out.
+
+    Only ``at_or_above_threshold`` reaches an alert, so it is the whole of the
+    processed outcome; everything else was dropped somewhere earlier in the
+    pipeline. The three dropped buckets are the diagnosis and stay visible
+    beneath their total, in the order the analysis ranked them, which is by
+    event count with ties keeping the declared bucket order. Every bucket is
+    listed even at zero, because an empty bucket is a coverage statement.
+
+    ``% dropped`` sizes a bucket against the dropped events rather than the
+    archive. A bucket holding four per cent of an archive that is ninety-five
+    per cent covered is most of the remaining problem, and the ``% total``
+    column alone hides that.
+    """
+
+    by_status = {item.status: item for item in analysis.status_counts}
+    processed = by_status[PROCESSED_STATUS].event_count if PROCESSED_STATUS in by_status else 0
+    dropped = sum(by_status[status].event_count for status in DROPPED_STATUSES if status in by_status)
+
+    def share(count: int) -> str:
+        # An archive that dropped nothing has no shares to report, and a column
+        # of 0.00% would read as a measurement rather than an empty set.
+        return _percent(_percentage(count, dropped)) if dropped else "-"
+
+    rows = [
+        _outcome_row(
+            _PROCESSED_OUTCOME,
+            f"{processed:,}",
+            _percent(_percentage(processed, analysis.total_events)),
+            "-",
+        ),
+        _outcome_row(
+            _DROPPED_LABEL,
+            f"{dropped:,}",
+            _percent(_percentage(dropped, analysis.total_events)),
+            share(dropped),
+        ),
+    ]
+    rows.extend(
+        _outcome_row(
+            f"  {item.status}",
+            f"{item.event_count:,}",
+            _percent(item.percentage),
+            share(item.event_count),
+        )
+        for item in analysis.status_counts
+        if item.status in DROPPED_STATUSES
+    )
+    return rows
+
+
+def _log_type_cells(status_counts: dict[str, int]) -> dict[str, str]:
+    """Lay one log type's buckets out as the outcome columns of its row."""
+
+    dropped = sum(status_counts.get(status, 0) for status in DROPPED_STATUSES)
+    cells = {
+        _PROCESSED_LABEL: f"{status_counts.get(PROCESSED_STATUS, 0):,}",
+        _DROPPED_LABEL: f"{dropped:,}",
+    }
+    cells.update({status: f"{status_counts.get(status, 0):,}" for status in DROPPED_STATUSES})
+    return cells
 
 
 def _effective_table(analysis: ArchiveAnalysis, by_key: dict[str, Verification]) -> list[str]:
@@ -213,11 +289,12 @@ def _summarize_log_types(
     return rows
 
 
-def _status_row(status: str, count: str, percentage: str) -> str:
+def _outcome_row(outcome: str, count: str, percentage: str, dropped_share: str) -> str:
     cells = [
-        f"{status:<{_STATUS_WIDTH}}",
+        f"{outcome:<{_OUTCOME_WIDTH}}",
         f"{count:>{_COUNT_WIDTH}}",
         f"{percentage:>{_PERCENT_WIDTH}}",
+        f"{dropped_share:>{_DROPPED_PERCENT_WIDTH}}",
     ]
     return "".join(cells).rstrip()
 
@@ -226,7 +303,7 @@ def _log_type_row(
     log_type: str,
     count: str,
     percentage: str,
-    status_values: dict[str, str],
+    column_values: dict[str, str],
 ) -> str:
     """Lay out one log-type summary row without truncating its identifier."""
 
@@ -235,8 +312,8 @@ def _log_type_row(
         f"{count:>{_COUNT_WIDTH}}",
         f"{percentage:>{_PERCENT_WIDTH}}",
     ]
-    for status in STATUSES:
-        cells.append(f"{status_values.get(status, ''):>{_STATUS_COUNT_WIDTHS[status]}}")
+    for column in _LOG_TYPE_COLUMNS:
+        cells.append(f"{column_values.get(column, ''):>{_LOG_TYPE_COLUMN_WIDTHS[column]}}")
     return "".join(cells).rstrip()
 
 
