@@ -57,7 +57,7 @@ def _analysis(path: Path) -> ArchiveAnalysis:
         findings=(
             Finding(
                 finding_key="key",
-                observed_status="no_rule",
+                observed_status="no_alerting_rule",
                 log_type="sshd",
                 message_pattern="sample",
                 event_count=1,

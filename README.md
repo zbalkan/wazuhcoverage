@@ -143,6 +143,8 @@ from wazuhcoverage import (
 
 `analyze_archive()` accepts either `str` or `pathlib.Path` and returns an `ArchiveAnalysis`. Pass `skip_malformed=False` for the fail-fast behaviour that `--strict` selects. Grouping is not parameterized: every call mines templates, so two analyses of the same archive are always comparable. CLI concerns such as glob expansion, `history.db`, report rendering, stdout/stderr, and exit codes are intentionally outside the analysis API.
 
+The status strings carried by `StatusCount.status`, `LogTypeCount.status` and `Finding.observed_status` are part of that API surface. Version 0.4.0 renames `no_rule` to `no_alerting_rule`, so a consumer that matched on the old string has to be updated. No alias is provided, because keeping the old name readable would keep the claim it makes readable with it; see [Classification](#classification) for why that claim was wrong.
+
 ## Statistics
 
 A report opens with a header that records the archive path, the event total, and how many malformed lines were skipped. Two complementary tables follow. The first is status-based and ranks status buckets by event count. The second is log-type-based: it pivots the detailed `(status, log type)` cells into one row per log type, ranks log types by aggregate event count, and shows the four status counts side by side.
@@ -156,30 +158,30 @@ Status
 ------
 Status                          Events   % total
 no_decoder                           3    37.50%
-no_rule                              2    25.00%
+no_alerting_rule                     2    25.00%
 at_or_above_threshold                2    25.00%
 below_threshold                      1    12.50%
 
 Log types
 ---------
-Log type                                Events   % total  no_decoder     no_rule  below_threshold  at_or_above_threshold
-sshd                                         4    50.00%           0           1                1                      2
-/var/log/app.log                             3    37.50%           3           0                0                      0
-windows                                      1    12.50%           0           1                0                      0
+Log type                                Events   % total  no_decoder  no_alerting_rule  below_threshold  at_or_above_threshold
+sshd                                         4    50.00%           0                 1                1                      2
+/var/log/app.log                             3    37.50%           3                 0                0                      0
+windows                                      1    12.50%           0                 1                0                      0
 ```
 
 `% total` is the share of `total_events`, which excludes malformed lines. The four status columns in the log-type table are event counts, and together they equal `Events` for that row. This lets the report answer both which log types dominate the archive and how each log type is classified without repeating a status-first breakdown.
 
 `ArchiveAnalysis.log_type_counts` remains the detailed API representation with one record per `(status, log type)` pair. `LogTypeCount.percentage` is the pair's share of the whole archive and `LogTypeCount.status_percentage` is its share of that status bucket. The CLI pivots those records only while rendering, so the analysis model and public API do not change.
 
-Every status is listed even when its count is zero, because an empty bucket is a coverage statement rather than missing data. Equal status counts keep the declared bucket order (`no_decoder`, `no_rule`, `below_threshold`, `at_or_above_threshold`). Log types are ordered by aggregate event count descending, with the log-type label breaking ties deterministically.
+Every status is listed even when its count is zero, because an empty bucket is a coverage statement rather than missing data. Equal status counts keep the declared bucket order (`no_decoder`, `no_alerting_rule`, `below_threshold`, `at_or_above_threshold`). Log types are ordered by aggregate event count descending, with the log-type label breaking ties deterministically.
 
 ## Classification
 
 Every archive event is placed in exactly one bucket:
 
 - `no_decoder`: no named Wazuh decoder is represented in the archive event.
-- `no_rule`: a decoder is present but no final rule is represented.
+- `no_alerting_rule`: a decoder is present but no rule is represented.
 - `below_threshold`: a rule is represented but its level is below the alert threshold, or its level is missing/unparseable and therefore cannot be proven to meet the threshold.
 - `at_or_above_threshold`: a rule is represented with a usable level at or above the threshold.
 
@@ -187,13 +189,23 @@ These buckets are mutually exclusive and their event counts sum to `total_events
 
 The CLI currently uses an alert threshold of 3. The library accepts an alternate `alert_threshold` value so configuration discovery can be added later without changing the analysis model.
 
-`no_rule` means no final rule is represented in the archive; it does not prove that no rule predicate was evaluated internally by Wazuh.
+### What an absent rule does and does not prove
+
+The bucket is called `no_alerting_rule` rather than `no_rule` because the archive cannot support the stronger claim, and the difference is the one an operator is most likely to be caught by. An archived event that carries no rule looks like a decoder chain that ran out of rules to try, and it may well be that; it may equally be an event that matched a rule perfectly well and was then discarded because that rule sits at level 0, which is how Wazuh expresses "recognised, not worth alerting on".
+
+The cause is in `analysisd`, and it is a matter of ordering rather than of omission. In `src/analysisd/analysisd.c` the rule-matching loop breaks out on `t_currently_rule->level == 0` several statements before it reaches `lf->generated_rule = t_currently_rule`, and it sets that same pointer back to `NULL` when a rule's `ignore` window suppresses a repeated event. The archive record is queued to the writer thread in every one of those cases, but `Eventinfo_to_jsonstr` in `src/analysisd/format/to_json.c` builds the `rule` object only under `if (lf->generated_rule)`. A level-0 match, a suppressed match and a genuine non-match therefore all reach `archives.json` as the same rule-less record, and nothing else in that record distinguishes them. The behaviour was read from Wazuh v4.12.0 and has been stable across the 4.x line.
+
+What follows is a limit on the data, not a defect this tool can repair. Reading a sample of such an event back through `wazuh-logtest` is the only way to settle which case it is, and the answer is worth having: a base rule such as `61100`, which catches Windows System informational events that no child rule claimed, marks a genuine gap in coverage, whereas a local level-0 rule written to silence a known-noisy source marks a decision someone already made. Both currently sit in the same bucket and look identical in the report, so the report says as much next to the findings instead of letting the empty `Rule` and `Level` fields imply otherwise.
+
+The replay loop is already the documented workflow: `wazuhcoverage --no-stats ... | wazuh-logtest` emits one sample per finding, and a finding whose replay resolves to a rule at level 0 is silenced rather than undetected. Automating the classification of those replays is deliberately out of scope here, as the [Scope](#scope) section explains; it belongs to a caller that composes this library with a logtest driver.
+
+One environment-side remedy is worth naming, with its cost stated. Overriding a level-0 rule to level 1, with `<rule id="61100" level="1" overwrite="yes">`, restores rule information to the archive and moves those events into `below_threshold`, where they group by rule ID and cost one finding instead of one per message shape. It is not free: the override makes the event an alert internally, so it increments the rule's fired counters and it changes what correlation rules keyed on that rule see through `if_matched_sid` and the last-events list. Apply it to rules whose child chain you control, and verify with `wazuh-logtest` afterwards rather than assuming.
 
 ## Finding grouping
 
 `below_threshold` events are grouped by rule ID because the rule is already the semantic grouping. Such findings deliberately do not claim one arbitrary log type even when that rule appears across several decoders or sources; log-type population statistics remain available separately in `ArchiveAnalysis.log_type_counts`.
 
-`no_decoder` and `no_rule` events are grouped by log type and a mined message template. Grouping runs in two stages. A regex normalizer masks syntactic variance first: common timestamp prefixes, UUIDs, long hexadecimal values, and decimal numbers with five or more digits. Drain then mines a template from the masked messages, which collapses the categorical variance no regex can reach without enumerating it — usernames, hostnames, file paths, commands, URL routes. Tokens that stay constant across a family survive both stages, so a port, an event ID, or an HTTP status code that never varies remains readable in the pattern; only positions that actually vary become `<*>`.
+`no_decoder` and `no_alerting_rule` events are grouped by log type and a mined message template. Grouping runs in two stages. A regex normalizer masks syntactic variance first: common timestamp prefixes, UUIDs, long hexadecimal values, and decimal numbers with five or more digits. Drain then mines a template from the masked messages, which collapses the categorical variance no regex can reach without enumerating it — usernames, hostnames, file paths, commands, URL routes. Tokens that stay constant across a family survive both stages, so a port, an event ID, or an HTTP status code that never varies remains readable in the pattern; only positions that actually vary become `<*>`.
 
 Mining is the only grouping engine. There is no flag to disable it, because masking alone leaves a high-entropy archive with nearly as many findings as it has events: on the labelled corpus in `tools/tune_drain.py`, 6,400 events across sixteen log families reduce to 5,352 distinct masked messages, and mining turns those into 25 templates.
 

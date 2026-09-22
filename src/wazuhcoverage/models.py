@@ -11,9 +11,22 @@ from typing import Optional
 # is used instead of PEP 604 "X | None" because Python 3.9 cannot evaluate the
 # union operator when a consumer calls typing.get_type_hints(). PEP 585 builtin
 # generics such as tuple[...] are subscriptable on 3.9 and are kept as-is.
+# Bucket identifiers, in declared order. They name what the archive record
+# proves, not what analysisd did internally, because an archive event carries
+# no trace of the rule evaluation that produced it.
+#
+# "no_alerting_rule" is deliberately not called "no_rule". Wazuh's analysisd
+# only attaches a rule to an archived event once it has committed to alerting
+# on it: the matching loop abandons a level-0 match before the rule pointer is
+# assigned, and clears that pointer again when a rule's ignore window swallows
+# the event, while the archive record is queued either way. The JSON formatter
+# then emits a "rule" object only when that pointer survived. A record with no
+# rule therefore means no alerting rule was attached -- three different upstream
+# outcomes that the archive stores identically. See the README's Classification
+# section for the source references.
 STATUSES = (
     "no_decoder",
-    "no_rule",
+    "no_alerting_rule",
     "below_threshold",
     "at_or_above_threshold",
 )

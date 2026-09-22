@@ -11,6 +11,9 @@ _LOG_TYPE_WIDTH = 32
 _COUNT_WIDTH = 14
 _PERCENT_WIDTH = 10
 _STATUS_COUNT_WIDTHS = {status: max(12, len(status) + 2) for status in STATUSES}
+# The one bucket whose meaning the archive underdetermines; see
+# wazuhcoverage.models.STATUSES for why.
+_AMBIGUOUS_STATUS = "no_alerting_rule"
 
 
 def render_report(analysis: ArchiveAnalysis) -> str:
@@ -65,6 +68,7 @@ def render_report(analysis: ArchiveAnalysis) -> str:
         )
 
     lines.extend(["", f"Findings: {len(analysis.findings):,}", ""])
+    lines.extend(_no_alerting_rule_note(analysis))
 
     for index, finding in enumerate(analysis.findings, start=1):
         lines.extend(
@@ -84,6 +88,33 @@ def render_report(analysis: ArchiveAnalysis) -> str:
         )
 
     return "\n".join(lines).rstrip() + "\n"
+
+
+def _no_alerting_rule_note(analysis: ArchiveAnalysis) -> list[str]:
+    """Return the caveat rows for the ``no_alerting_rule`` bucket, if it is used.
+
+    The bucket name is honest but incomplete on its own: the report shows an
+    empty Rule and Level for every one of these findings, which reads as "the
+    decoder chain dead-ended" when it can equally mean that a level-0 rule
+    matched and Wazuh chose not to alert. That difference decides whether a
+    finding is a detection gap or a deliberate silence, and the archive cannot
+    settle it, so the report says so where the findings are read rather than
+    leaving it to the documentation.
+
+    The rows are emitted only when the bucket holds events, so an archive that
+    never hits the ambiguity is not asked to carry a note about it.
+    """
+
+    if not any(item.status == _AMBIGUOUS_STATUS and item.event_count for item in analysis.status_counts):
+        return []
+
+    return [
+        f"Note: a {_AMBIGUOUS_STATUS} event carries no rule in the archive. Wazuh writes that",
+        "      same record whether no rule matched, the matching rule was level 0, or a",
+        "      rule's ignore window suppressed the match. Replay the sample through",
+        "      wazuh-logtest to tell those apart.",
+        "",
+    ]
 
 
 def _summarize_log_types(

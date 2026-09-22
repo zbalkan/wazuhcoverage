@@ -12,13 +12,13 @@ def _analysis() -> ArchiveAnalysis:
         malformed_lines=2,
         status_counts=(
             StatusCount(status="no_decoder", event_count=3, percentage=30.0),
-            StatusCount(status="no_rule", event_count=3, percentage=30.0),
+            StatusCount(status="no_alerting_rule", event_count=3, percentage=30.0),
             StatusCount(status="at_or_above_threshold", event_count=3, percentage=30.0),
             StatusCount(status="below_threshold", event_count=1, percentage=10.0),
         ),
         log_type_counts=(
             LogTypeCount(
-                status="no_rule",
+                status="no_alerting_rule",
                 log_type="sshd",
                 event_count=2,
                 percentage=20.0,
@@ -39,7 +39,7 @@ def _analysis() -> ArchiveAnalysis:
                 status_percentage=100.0,
             ),
             LogTypeCount(
-                status="no_rule",
+                status="no_alerting_rule",
                 log_type=None,
                 event_count=1,
                 percentage=10.0,
@@ -80,7 +80,7 @@ def test_report_renders_status_and_log_type_tables() -> None:
         "%",
         "total",
         "no_decoder",
-        "no_rule",
+        "no_alerting_rule",
         "below_threshold",
         "at_or_above_threshold",
     ]
@@ -173,7 +173,7 @@ def test_a_long_sample_is_never_wrapped_or_padded() -> None:
         findings=(
             Finding(
                 finding_key="key",
-                observed_status="no_rule",
+                observed_status="no_alerting_rule",
                 log_type="sshd",
                 message_pattern="pattern",
                 event_count=1,
@@ -201,3 +201,27 @@ def test_report_output_is_plain_ascii_text() -> None:
 
     assert "\x1b" not in text
     assert text.isascii()
+
+
+def test_report_flags_what_an_absent_rule_does_not_prove() -> None:
+    # An empty Rule and Level reads as "nothing matched", but Wazuh writes the
+    # same archive record for a level-0 match and for a suppressed one. The
+    # report carries that caveat where the findings are read.
+    text = render_report(_analysis())
+
+    assert "no_alerting_rule event carries no rule in the archive" in text
+    assert "the matching rule was level 0" in text
+    assert "wazuh-logtest" in text
+
+
+def test_the_caveat_is_omitted_when_the_bucket_is_empty() -> None:
+    analysis = _analysis()
+    analysis = replace(
+        analysis,
+        status_counts=tuple(
+            replace(item, event_count=0, percentage=0.0) if item.status == "no_alerting_rule" else item
+            for item in analysis.status_counts
+        ),
+    )
+
+    assert "Note:" not in render_report(analysis)

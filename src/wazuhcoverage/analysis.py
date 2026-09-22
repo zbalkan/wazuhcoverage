@@ -311,6 +311,16 @@ def _create_events(connection: Any, archive: Path, *, skip_malformed: bool) -> N
 
 
 def _create_views(connection: Any, alert_threshold: int) -> None:
+    # The classification reads the archive record and nothing else. The rule
+    # branch is the one that cannot be tightened: analysisd abandons a level-0
+    # match before it assigns lf->generated_rule, and sets that pointer back to
+    # NULL when a rule's ignore window suppresses the event, yet queues the
+    # archive record in every case; the JSON formatter writes a "rule" object
+    # only when the pointer survived. A missing rule therefore covers "nothing
+    # matched", "a level-0 rule matched" and "a match was suppressed" alike,
+    # and no field in the record separates them. The bucket is named for what
+    # can be proven -- no alerting rule was attached -- rather than for the
+    # stronger claim that no rule was evaluated.
     connection.execute(
         f"""
         CREATE TEMP VIEW classified_events AS
@@ -318,7 +328,7 @@ def _create_views(connection: Any, alert_threshold: int) -> None:
             * EXCLUDE (is_malformed),
             CASE
                 WHEN nullif(decoder_name, '') IS NULL THEN 'no_decoder'
-                WHEN nullif(rule_id, '') IS NULL THEN 'no_rule'
+                WHEN nullif(rule_id, '') IS NULL THEN 'no_alerting_rule'
                 WHEN rule_level IS NULL OR rule_level < {int(alert_threshold)} THEN 'below_threshold'
                 ELSE 'at_or_above_threshold'
             END AS observed_status,
@@ -380,7 +390,10 @@ def _create_template_map(connection: Any, miner: Any) -> None:
 
     Only the statuses that group by message text are mined. ``below_threshold``
     is excluded because it groups by rule ID, where the rule is already the
-    semantic grouping and a mined template would add nothing.
+    semantic grouping and a mined template would add nothing. ``no_decoder``
+    and ``no_alerting_rule`` have no rule ID to group by -- the latter by
+    definition, since the absence of a rule is what puts an event there -- so
+    the message is the only grouping key available to them.
 
     The scan, the deduplication, the join and the counting all stay in DuckDB;
     Drain only ever sees the distinct normalized strings, which keeps the cost
@@ -404,7 +417,7 @@ def _create_template_map(connection: Any, miner: Any) -> None:
         FROM (
             SELECT DISTINCT normalized_log
             FROM normalized_events
-            WHERE observed_status IN ('no_decoder', 'no_rule')
+            WHERE observed_status IN ('no_decoder', 'no_alerting_rule')
               AND full_log IS NOT NULL
               AND full_log <> ''
         )

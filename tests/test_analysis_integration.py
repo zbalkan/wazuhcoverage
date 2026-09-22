@@ -72,7 +72,7 @@ def test_analysis_classifies_and_groups_findings(tmp_path: Path) -> None:
     assert result.total_events == 5
     assert counts == {
         "no_decoder": 2,
-        "no_rule": 1,
+        "no_alerting_rule": 1,
         "below_threshold": 1,
         "at_or_above_threshold": 1,
     }
@@ -307,7 +307,7 @@ def test_status_counts_carry_total_percentage_and_are_ordered_descending(tmp_pat
     assert counts == sorted(counts, reverse=True)
     assert result.status_counts[0].status == "no_decoder"
     assert percentages["no_decoder"] == pytest.approx(40.0)
-    assert percentages["no_rule"] == pytest.approx(20.0)
+    assert percentages["no_alerting_rule"] == pytest.approx(20.0)
     # Malformed lines are outside the denominator, so the buckets account for
     # the whole archive and nothing else.
     assert sum(percentages.values()) == pytest.approx(100.0)
@@ -327,7 +327,7 @@ def test_status_count_ties_keep_a_stable_declared_order(tmp_path: Path) -> None:
 
     assert [item.status for item in result.status_counts] == [
         "no_decoder",
-        "no_rule",
+        "no_alerting_rule",
         "below_threshold",
         "at_or_above_threshold",
     ]
@@ -353,7 +353,7 @@ def test_log_type_counts_are_ordered_by_count_across_statuses(tmp_path: Path) ->
     # A global count ordering, not one grouped by status first: the largest
     # populations must surface regardless of which bucket they fell into.
     assert counts == sorted(counts, reverse=True)
-    assert (result.log_type_counts[0].status, result.log_type_counts[0].log_type) == ("no_rule", "sshd")
+    assert (result.log_type_counts[0].status, result.log_type_counts[0].log_type) == ("no_alerting_rule", "sshd")
 
 
 def test_log_type_percentages_measure_archive_and_status_shares(tmp_path: Path) -> None:
@@ -372,7 +372,7 @@ def test_log_type_percentages_measure_archive_and_status_shares(tmp_path: Path) 
     result = analyze_archive(archive)
     rows = {(item.status, item.log_type): item for item in result.log_type_counts}
 
-    sshd = rows[("no_rule", "sshd")]
+    sshd = rows[("no_alerting_rule", "sshd")]
     assert sshd.percentage == pytest.approx(60.0)
     assert sshd.status_percentage == pytest.approx(75.0)
 
@@ -383,7 +383,7 @@ def test_log_type_percentages_measure_archive_and_status_shares(tmp_path: Path) 
     assert app.status_percentage == pytest.approx(100.0)
 
     assert sum(item.percentage for item in result.log_type_counts) == pytest.approx(100.0)
-    for status in ("no_decoder", "no_rule"):
+    for status in ("no_decoder", "no_alerting_rule"):
         shares = [item.status_percentage for item in result.log_type_counts if item.status == status]
         assert sum(shares) == pytest.approx(100.0)
 
@@ -447,3 +447,63 @@ def test_single_line_samples_are_untouched(tmp_path: Path) -> None:
     for finding in analyze_archive(archive).findings:
         assert finding.sample_log == finding.sample_log.strip()
         assert "\n" not in finding.sample_log
+
+
+def test_a_level_zero_match_is_archived_as_no_alerting_rule(tmp_path: Path) -> None:
+    # Regression guard for the bucket's meaning, not for a code path. Wazuh's
+    # analysisd abandons a level-0 match before it assigns lf->generated_rule
+    # and clears that pointer when a rule's ignore window suppresses the event,
+    # while the archive record is written either way; the JSON formatter emits
+    # a "rule" object only when the pointer survived. This record is a real
+    # archived EventChannel event that wazuh-logtest resolves to rule 61100 at
+    # level 0, so a decoded event with no rule must land in no_alerting_rule
+    # and must not be reported as though no rule had been evaluated.
+    archive = tmp_path / "archives.json"
+    _write_jsonl(
+        archive,
+        [
+            {
+                "timestamp": "2026-09-20T21:00:05+00:00",
+                "agent": {"id": "003", "name": "jumphost1"},
+                "location": "EventChannel",
+                "decoder": {"name": "windows_eventchannel"},
+                "full_log": (
+                    '{"win":{"system":{"providerName":"Service Control Manager",'
+                    '"eventID":"7036","channel":"System",'
+                    '"computer":"jumphost1.zaferbalkan.com",'
+                    '"message":"The Client License Service (ClipSVC) service '
+                    'entered the stopped state."}}}'
+                ),
+            }
+        ],
+    )
+
+    result = analyze_archive(archive)
+    counts = {item.status: item.event_count for item in result.status_counts}
+
+    assert counts["no_alerting_rule"] == 1
+    assert counts["no_decoder"] == 0
+
+    finding = result.findings[0]
+    assert finding.observed_status == "no_alerting_rule"
+    assert finding.observed_decoder == "windows_eventchannel"
+    # The archive has no rule to report, and the model says so with None rather
+    # than inventing one. Separating a level-0 match from an unmatched event
+    # requires replaying the sample, which is why the sample is carried.
+    assert finding.observed_rule_id is None
+    assert finding.observed_rule_level is None
+    assert finding.sample_log.startswith('{"win":')
+
+
+def test_no_alerting_rule_is_the_declared_bucket_name() -> None:
+    # The name is load-bearing: "no_rule" asserted that no rule was evaluated,
+    # which an archive record cannot show. Pin the identifier so the weaker,
+    # provable claim is not quietly renamed back.
+    from wazuhcoverage.models import STATUSES
+
+    assert STATUSES == (
+        "no_decoder",
+        "no_alerting_rule",
+        "below_threshold",
+        "at_or_above_threshold",
+    )
