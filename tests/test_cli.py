@@ -1,3 +1,4 @@
+import gzip
 import io
 from dataclasses import replace
 from pathlib import Path
@@ -73,6 +74,168 @@ def test_flags_are_accepted_before_or_after_the_targets() -> None:
 
     assert vars(leading) == vars(trailing)
     assert leading.targets == ["/archives/a.json", "/archives/b.json"]
+
+
+class _PipedStdin:
+    """A stdin that is a pipe carrying ``data``."""
+
+    def __init__(self, data: bytes) -> None:
+        self.buffer = io.BytesIO(data)
+
+    def isatty(self) -> bool:
+        return False
+
+
+class _TerminalStdin:
+    def __init__(self) -> None:
+        self.buffer = io.BytesIO(b"")
+
+    def isatty(self) -> bool:
+        return True
+
+
+def test_targets_are_optional_so_a_pipe_can_supply_one() -> None:
+    assert cli.build_parser().parse_args(["-sin"]).targets == []
+
+
+def test_a_piped_archive_is_analyzed_without_a_target(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys) -> None:
+    rows = b'{"full_log": "piped", "decoder": {"name": "sshd"}}\n'
+    scanned: list[Path] = []
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cli.sys, "stdin", _PipedStdin(rows))
+    monkeypatch.setattr(
+        cli,
+        "analyze_archive",
+        lambda path, **_kwargs: scanned.append(Path(path)) or _analysis(Path(path)),
+    )
+
+    assert cli.main(["-n"]) == 0
+
+    captured = capsys.readouterr()
+    assert captured.out == "raw sample\n"
+    assert "Processing standard input" in captured.err
+    assert "Matched: 1 | Processed: 1" in captured.err
+
+    # The stream was spooled to a real file that DuckDB could have scanned,
+    # and that file does not outlive the run.
+    assert len(scanned) == 1
+    assert not scanned[0].exists()
+
+
+def test_a_dash_target_reads_the_pipe_explicitly(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cli.sys, "stdin", _PipedStdin(b'{"full_log": "piped"}\n'))
+    monkeypatch.setattr(cli, "analyze_archive", lambda path, **_kwargs: _analysis(Path(path)))
+
+    assert cli.main(["-n", "-"]) == 0
+    assert capsys.readouterr().out == "raw sample\n"
+
+
+def test_a_piped_report_is_labelled_stdin_not_a_temporary_path(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys
+) -> None:
+    # The spooled path is a per-run temporary name. Printing it would make two
+    # runs over the same stream produce different reports and would name a file
+    # the reader cannot open.
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cli.sys, "stdin", _PipedStdin(b'{"full_log": "piped"}\n'))
+    monkeypatch.setattr(cli, "analyze_archive", lambda path, **_kwargs: _analysis(Path(path)))
+
+    assert cli.main([]) == 0
+
+    out = capsys.readouterr().out
+    assert "Archive: <stdin>" in out
+    assert "wazuhcoverage-stdin-" not in out
+
+
+def test_a_gzipped_pipe_is_spooled_under_a_gz_name(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys) -> None:
+    # DuckDB chooses its decompressor from the extension, so the sniffed magic
+    # number has to reach the spooled file's name or a compressed pipe is read
+    # as binary garbage.
+    payload = gzip.compress(b'{"full_log": "piped"}\n')
+    suffixes: list[str] = []
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cli.sys, "stdin", _PipedStdin(payload))
+    monkeypatch.setattr(
+        cli,
+        "analyze_archive",
+        lambda path, **_kwargs: suffixes.append("".join(Path(path).suffixes)) or _analysis(Path(path)),
+    )
+
+    assert cli.main(["-n"]) == 0
+    assert suffixes == [".json.gz"]
+    capsys.readouterr()
+
+
+def test_a_plain_pipe_is_spooled_byte_for_byte(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys) -> None:
+    # The first bytes are consumed to sniff for gzip and must be written back,
+    # or every uncompressed archive loses its first two characters.
+    rows = b'{"full_log": "first"}\n{"full_log": "second"}\n'
+    spooled: list[bytes] = []
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cli.sys, "stdin", _PipedStdin(rows))
+    monkeypatch.setattr(
+        cli,
+        "analyze_archive",
+        lambda path, **_kwargs: spooled.append(Path(path).read_bytes()) or _analysis(Path(path)),
+    )
+
+    assert cli.main(["-n"]) == 0
+    assert spooled == [rows]
+    capsys.readouterr()
+
+
+def test_a_terminal_without_a_target_asks_for_one(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cli.sys, "stdin", _TerminalStdin())
+    monkeypatch.setattr(cli, "analyze_archive", lambda *_args, **_kwargs: pytest.fail("nothing to analyze"))
+
+    assert cli.main([]) == 2
+    assert "no target given" in capsys.readouterr().err
+
+
+def test_a_piped_archive_is_never_recorded_in_history(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys) -> None:
+    # A stream has no stable path, so it can be neither looked up nor stored.
+    # Recording the spooled temporary name would grow history.db without ever
+    # skipping anything.
+    class FakeHistory:
+        def __init__(self, _path: Path) -> None:
+            pass
+
+        def contains(self, _path: Path) -> bool:
+            raise AssertionError("a stream must not be looked up in history")
+
+        def add(self, _path: Path) -> None:
+            raise AssertionError("a stream must not be recorded in history")
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cli, "History", FakeHistory)
+    monkeypatch.setattr(cli.sys, "stdin", _PipedStdin(b'{"full_log": "piped"}\n'))
+    monkeypatch.setattr(cli, "analyze_archive", lambda path, **_kwargs: _analysis(Path(path)))
+
+    assert cli.main(["-n"]) == 0
+    capsys.readouterr()
+
+
+def test_a_failing_stream_still_leaves_no_temporary_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys
+) -> None:
+    seen: list[Path] = []
+
+    def explode(path, **_kwargs):
+        seen.append(Path(path))
+        raise RuntimeError("boom")
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cli.sys, "stdin", _PipedStdin(b"not json\n"))
+    monkeypatch.setattr(cli, "analyze_archive", explode)
+
+    assert cli.main(["-n"]) == 1
+    assert seen and not seen[0].exists()
+    assert "failed <stdin>" in capsys.readouterr().err
 
 
 def test_cli_exposes_no_engine_switch() -> None:

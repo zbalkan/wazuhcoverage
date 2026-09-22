@@ -46,6 +46,13 @@ Sweep a month, then replay everything that is not covered through logtest:
 wazuhcoverage --no-stats "/var/ossec/logs/archives/2026/**/*.json.gz" | wazuh-logtest
 ```
 
+Feed it an archive on standard input, from a file, a decompressor, or a remote host:
+
+```bash
+cat logs.json | wazuhcoverage -sin
+ssh manager "cat /var/ossec/logs/archives/2026/Sep/ossec-archive-18.json.gz" | wazuhcoverage
+```
+
 Re-read archives you have already processed:
 
 ```bash
@@ -55,12 +62,12 @@ wazuhcoverage -i "/var/ossec/logs/archives/2026/**/*.json.gz"
 ## Command line
 
 ```text
-wazuhcoverage [-i|--ignore-history] [-n|--no-stats] [-s|--strict] TARGET [TARGET...]
+wazuhcoverage [-i|--ignore-history] [-n|--no-stats] [-s|--strict] [TARGET...]
 wazuhcoverage (-V|--version)
 wazuhcoverage (-h|--help)
 ```
 
-There are no subcommands. Each `TARGET` is a literal path or a glob; `**` recurses. Quote globs so the shell does not expand them first. Multiple targets are allowed, overlapping matches are deduplicated, and archives are processed in sorted path order. Flags may appear before or after the targets.
+There are no subcommands. Each `TARGET` is a literal path, a glob, or `-` for standard input; `**` recurses. Quote globs so the shell does not expand them first. Multiple targets are allowed, overlapping matches are deduplicated, and archives are processed in sorted path order. Flags may appear before or after the targets.
 
 | Short | Long | Effect |
 | --- | --- | --- |
@@ -83,17 +90,35 @@ wazuhcoverage --ignore-history --no-stats --strict "/archives/**/*.json.gz"
 | --- | --- |
 | `0` | Every matched archive was processed. |
 | `1` | At least one archive failed, or the downstream pipe closed early. |
-| `2` | No target matched, or `history.db` could not be read. |
+| `2` | No target was given or matched, or `history.db` could not be read. |
 
 `--version` prints `wazuhcoverage <version>` to stdout and exits `0` without needing a target, so it is safe to call from a health check or a deployment script. The number it prints is the same one the installed distribution carries; `pyproject.toml` reads it from `wazuhcoverage.__version__`, so the two cannot disagree.
 
 Progress lines, warnings, and the closing `Matched / Processed / Skipped / Failed` summary always go to stderr. Only the report or the samples go to stdout, so redirecting stdout gives you a clean file either way. One failing archive does not stop the run; the others still process and the failure is named on stderr.
 
+### Reading from standard input
+
+An archive can arrive on a pipe instead of as a path. Either spell it as the target `-`, or leave the targets out entirely and let the tool notice that stdin is not a terminal:
+
+```bash
+cat logs.json | wazuhcoverage -sin
+gunzip -c archive.json.gz | wazuhcoverage -
+ssh manager "cat /var/ossec/logs/archives/2026/Sep/ossec-archive-18.json.gz" | wazuhcoverage -n | wazuh-logtest
+```
+
+Plain and gzipped streams both work; the stream is sniffed for gzip's magic number, so nothing needs to be declared. A piped archive may be mixed with path targets, and is always processed first.
+
+Three things differ from analyzing a path, all of them consequences of a stream having no name:
+
+The report calls it `<stdin>` rather than naming the temporary file it was spooled to, so two runs over the same stream produce the same report. It is never recorded in, or skipped because of, `history.db` — piping the same archive twice analyzes it twice, because there is nothing stable to compare against. And it costs temporary disk space of its own size, because DuckDB scans and seeks within a file and a pipe offers neither. For a multi-gigabyte archive that is already on disk, pass the path.
+
+If stdin is a terminal and no target is given, the tool asks for one and exits `2` rather than waiting for input that is not coming. If it is a pipe that turns out to be empty, you get an empty report and a `read 0 bytes from stdin` warning on stderr.
+
 ### Processing history
 
 The CLI remembers which archives it has already handled in `history.db`, a JSON file written in the current working directory. An archive listed there is skipped on the next run, which is what makes a nightly cron entry over a growing archive directory cheap.
 
-A path is recorded only after analysis finished **and** stdout flushed, so a run that dies partway through, or whose downstream pipe closed, does not mark the archive as done. Delete the file to start over, or pass `--ignore-history` for one run. The library API does not use it.
+A path is recorded only after analysis finished **and** stdout flushed, so a run that dies partway through, or whose downstream pipe closed, does not mark the archive as done. Delete the file to start over, or pass `--ignore-history` for one run. Piped archives never enter it, and the library API does not use it.
 
 ### Replaying samples through logtest
 
