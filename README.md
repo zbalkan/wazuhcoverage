@@ -1,5 +1,8 @@
 # wazuhcoverage
 
+[![CI](https://github.com/zbalkan/wazuhcoverage/actions/workflows/ci.yml/badge.svg)](https://github.com/zbalkan/wazuhcoverage/actions/workflows/ci.yml)
+[![Dependency Graph](https://github.com/zbalkan/wazuhcoverage/actions/workflows/dependabot/update-graph/badge.svg)](https://github.com/zbalkan/wazuhcoverage/actions/workflows/dependabot/update-graph)
+
 `wazuhcoverage` measures what happens to events captured in Wazuh JSON archives. It classifies each event by decoder/rule outcome, groups uncovered events into actionable findings, and keeps one real sample per finding for replay through `wazuh-logtest`.
 
 It reads `archives.json` and `archives.json.gz` produced when Wazuh JSON archiving is enabled and never modifies them. See the Wazuh documentation for [archiving event logs](https://documentation.wazuh.com/current/user-manual/manager/event-logging.html#archiving-event-logs).
