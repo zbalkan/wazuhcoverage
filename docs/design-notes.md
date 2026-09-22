@@ -1,10 +1,10 @@
 # Design notes
 
-Rationale behind decisions that the [README](../README.md) states as behaviour. Nothing here is needed to use the tool; it exists so that a change to any of it is made deliberately, with the measurement or the upstream constraint in view.
+Rationale behind implementation decisions described at a higher level in the [README](../README.md), [CLI reference](CLI.md), and [API reference](API.md). This page exists so changes to those decisions are made with their measurements and upstream constraints in view.
 
 ## Why the ambiguous bucket is named as it is
 
-Wazuh's analysisd drops the matched rule from an archived event when that rule sits at level 0, and again when a rule's `ignore` window suppresses the event. The mechanism, with source references, is in [docs/CAVEATS.md](https://github.com/zbalkan/wazuhcoverage/blob/master/docs/CAVEATS.md); what follows is what this project does about it.
+Wazuh's analysisd drops the matched rule from an archived event when that rule sits at level 0, and again when a rule's `ignore` window suppresses the event. The mechanism, with source references, is in [CAVEATS.md](CAVEATS.md); what follows is what this project does about it.
 
 The bucket is named for what the record proves — no alerting rule was attached — rather than for the stronger claim that no rule was evaluated. `no_rule`, the obvious name, is the one it must not have: a reader acts on that name, and acting on it means writing a rule for an event a level-0 rule already recognises.
 
@@ -22,17 +22,17 @@ The unit of replay is the finding, not the event. That is what grouping bought: 
 
 ### A session per sample
 
-`wazuhtester` offers `send_multiple_logs()`, which shares one daemon session so that frequency and composite rules can fire. That is the wrong primitive here: the samples in a coverage report are unrelated messages from different log families, and a shared session would let them prime each other. Each sample therefore goes through `send_log()` without a token, which creates and removes a session of its own. The blind spot that buys, and why that trade was taken, is in [docs/CAVEATS.md](https://github.com/zbalkan/wazuhcoverage/blob/master/docs/CAVEATS.md#logtest-sees-one-event-so-frequency-rules-never-fire).
+`wazuhtester` offers `send_multiple_logs()`, which shares one daemon session so that frequency and composite rules can fire. That is the wrong primitive here: the samples in a coverage report are unrelated messages from different log families, and a shared session would let them prime each other. Each sample therefore goes through `send_log()` without a token, which creates and removes a session of its own. The blind spot that buys, and why that trade was taken, is in [CAVEATS.md](CAVEATS.md#one-sample-cannot-reproduce-stateful-rules).
 
 ### Location, and what could not be derived
 
-`Finding` carries `observed_location`, taken from the archive with `any_value()` over the group, because the decoder chain consults it. `log_format` could not be handled the same way, since the archive does not record it; it is a parameter with wazuh-logtest's own `syslog` default. Both are covered in [docs/CAVEATS.md](https://github.com/zbalkan/wazuhcoverage/blob/master/docs/CAVEATS.md#location-decides-the-decoder-and-a-pasted-log-has-none).
+`Finding` carries `observed_location`, taken from the archive with `any_value()` over the group, because the decoder chain consults it. `log_format` could not be handled the same way, since the archive does not record it; it is a parameter with wazuh-logtest's own `syslog` default. Both are covered in [CAVEATS.md](CAVEATS.md#location-is-preserved-log-format-is-not).
 
 ### Failure is never a gap
 
 A replay that does not produce a usable answer is `unverified`, and `unverified` is never inferred from the archive. A daemon error, a raised exception, an unrecognized status, and a matched rule whose level cannot be read all land there with the reason attached. Turning a broken socket into a coverage gap would send someone to write a rule for an event that is already handled, which is the specific failure this whole feature exists to prevent.
 
-Configuration faults are separated from results. A missing `wazuhtester` or a socket that refuses connections is the same fault for every archive, so the CLI probes once before scanning anything and exits `2`. Discovering it after thirty archives, or printing reports whose effective column is silently absent, would be the expensive way to learn about a typo.
+Replay availability is separated from archive processing. A missing `wazuhtester` or an unusable socket has the same answer for every archive, so the CLI probes once before scanning anything. If replay is unavailable, it warns once and continues with archive-only results rather than failing otherwise valid analysis.
 
 ### Best effort, decided once
 
@@ -61,7 +61,7 @@ The parameters are set in `wazuhcoverage.analysis` and differ from the drain3 de
 
 The similarity threshold is the consequential one, and both directions fail loudly. At the drain3 default of 0.4 the corpus merges Windows `4624` with `4625` — a successful logon reported together with a failed one — and firewall `ACCEPT` with `DROP`. Above 0.57 the count jumps from 25 templates to 93 as families whose variable tokens are paths or hostnames shatter into one finding per value. Across three corpus seeds, 0.56 and 0.57 were the only values with neither defect, so 0.56 is taken with margin on both sides. Two tests in `tests/test_template_mining.py` guard that band: one fails if opposite outcomes of a family merge, the other if a high-cardinality family fragments.
 
-drain3 is configured explicitly rather than from a `drain3.ini`, because the library otherwise loads one from the current working directory, which would make an archive's findings depend on where the command happened to run. No masking instructions are registered with drain3 either; the SQL normalizer already applies the masks the README documents, and a second masking pass would silently widen them.
+drain3 is configured explicitly rather than from a `drain3.ini`, because the library otherwise loads one from the current working directory, which would make an archive's findings depend on where the command happened to run. No masking instructions are registered with drain3 either; the analysis normalizer already applies the masks described in this section, and a second masking pass would silently widen them.
 
 ### Cost and the cluster cap
 
@@ -123,7 +123,7 @@ The constraint applies only in a shared environment, and only when that environm
 
 Adding a dependency is therefore the thing to be careful about, and `tools/check_dependency_pins.py` exists to enforce that rather than to describe today's tree. It walks the installed graph and fails when an exact pin appears or disappears; CI runs it on every supported interpreter alongside `pip check` and a from-scratch resolution.
 
-`wazuhtester` is an optional extra rather than a dependency, because it requires strictly more than this package does: Linux, Python 3.10 or newer, and a reachable Wazuh manager. Declaring it as a dependency would drop the 3.9 floor, the Windows and macOS support, and the ability to analyze an archive on a laptop, all to serve one flag. The test suite stubs it for the same reason, so CI exercises the mapping logic on every supported interpreter without installing a package half of them cannot have.
+`wazuhtester` is an optional extra rather than a dependency, because it requires strictly more than this package does: Linux, Python 3.10 or newer, and a reachable Wazuh manager. Declaring it as a dependency would drop the 3.9 floor, the Windows and macOS support, and the ability to analyze an archive on a laptop, all to serve optional manager replay. The test suite stubs it for the same reason, so CI exercises the mapping logic on every supported interpreter without installing a package half of them cannot have.
 
 DuckDB dropped Python 3.9 in 1.5.0, so the dependency is capped at `duckdb<1.5` on 3.9 through an explicit environment marker. The cap is stated in `pyproject.toml` even though resolvers already honour `Requires-Python`, so a 3.9 install can never silently acquire a DuckDB the package has not been tested against.
 
