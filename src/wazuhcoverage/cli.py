@@ -8,14 +8,15 @@ import os
 import shutil
 import sys
 import tempfile
-from collections.abc import Iterable, Iterator
+from collections.abc import Generator, Iterable
 from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
-from typing import Any, Optional, TypeVar, overload
+from typing import Any, Optional, TextIO, TypeVar, overload
 
 from wazuhcoverage import __version__
 from wazuhcoverage.analysis import DEFAULT_ALERT_THRESHOLD, analyze_archive
+from wazuhcoverage.models import Verification
 from wazuhcoverage.report import render_report
 from wazuhcoverage.targets import resolve_targets
 from wazuhcoverage.verification import DEFAULT_LOG_FORMAT, unavailable_reason, verify_findings
@@ -70,9 +71,9 @@ class _ArgumentParser(argparse.ArgumentParser):
         args: Optional[Iterable[str]] = None,
         namespace: Any = None,
     ) -> Any:
-        argument_list = list(sys.argv[1:] if args is None else args)
-        version_flags = {"-V", "--version"}
-        incompatible_flags = {
+        argument_list: list[str] = list(sys.argv[1:] if args is None else args)
+        version_flags: set[str] = {"-V", "--version"}
+        incompatible_flags: set[str] = {
             "-n",
             "--no-stats",
             "-s",
@@ -246,7 +247,7 @@ def _report_one(archive: Path, label: Path, args: argparse.Namespace, replay: bo
         skip_malformed=not args.strict,
     )
 
-    verifications = ()
+    verifications: tuple[Verification, ...] = ()
     if replay:
         verifications = verify_findings(
             analysis,
@@ -293,7 +294,7 @@ def _stdin_is_a_terminal() -> bool:
 
 
 @contextmanager
-def _spooled_stdin() -> Iterator[Path]:
+def _spooled_stdin() -> Generator[Path, None, None]:
     """Copy stdin to a temporary file and yield its path.
 
     DuckDB scans a path and needs to seek within it, and a pipe offers neither,
@@ -332,7 +333,7 @@ def _stdin_bytes() -> Any:
     decoding layer would corrupt a compressed stream outright.
     """
 
-    stream = sys.stdin
+    stream: Optional[TextIO] = sys.stdin
     if stream is None:
         raise RuntimeError("standard input is not available")
     return getattr(stream, "buffer", stream)
