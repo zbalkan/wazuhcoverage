@@ -24,15 +24,31 @@ jobs:
             exit 1
           fi
 
+      # pyproject declares the version dynamically, reading it from
+      # wazuhcoverage.__version__, so that is the source read here too. The
+      # module is parsed rather than imported, because this step runs before
+      # the package and its dependencies are installed.
       - name: Read package version
         id: version
         run: |
           VERSION=$(python - <<'PY'
-          import tomllib
-          with open("pyproject.toml", "rb") as handle:
-              print(tomllib.load(handle)["project"]["version"])
+          import ast
+
+          source = open("src/wazuhcoverage/__init__.py", encoding="utf-8").read()
+          for node in ast.parse(source).body:
+              if isinstance(node, ast.Assign) and any(
+                  isinstance(target, ast.Name) and target.id == "__version__" for target in node.targets
+              ):
+                  print(ast.literal_eval(node.value))
+                  break
+          else:
+              raise SystemExit("__version__ not found in src/wazuhcoverage/__init__.py")
           PY
           )
+          if [ -z "$VERSION" ]; then
+            echo "Could not read the package version."
+            exit 1
+          fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Validate version tag state

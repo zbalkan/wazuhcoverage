@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 from typing import Optional
 
+from wazuhcoverage import __version__
 from wazuhcoverage.analysis import DEFAULT_ALERT_THRESHOLD, analyze_archive
 from wazuhcoverage.history import History
 from wazuhcoverage.report import render_report
@@ -18,13 +19,24 @@ HISTORY_FILE = Path("history.db")
 
 
 def build_parser() -> argparse.ArgumentParser:
-    # Every flag is a single-character store_true, so argparse accepts them
-    # merged into one cluster (-ins, -sin) as well as separately. Keeping them
-    # single-character is what preserves that, and the long forms stay the
-    # documented spelling for anything written into a cron entry or a script.
+    # The three behaviour flags are single-character store_true options, so
+    # argparse accepts them merged into one cluster (-ins, -sin) as well as
+    # separately. Keeping them single-character is what preserves that, and the
+    # long forms stay the documented spelling for anything written into a cron
+    # entry or a script.
     parser = argparse.ArgumentParser(
         prog="wazuhcoverage",
         description="Analyze Wazuh JSON archives and emit coverage statistics or representative samples.",
+    )
+    # --version is an argparse action rather than a flag on the namespace: it
+    # prints and exits, so it never reaches main() and never has to be excluded
+    # from the "targets are required" rule the way a store_true would.
+    parser.add_argument(
+        "-V",
+        "--version",
+        action="version",
+        version=f"%(prog)s {__version__}",
+        help="Print the installed version and exit.",
     )
     parser.add_argument(
         "-i",

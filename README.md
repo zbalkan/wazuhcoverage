@@ -56,6 +56,8 @@ wazuhcoverage -i "/var/ossec/logs/archives/2026/**/*.json.gz"
 
 ```text
 wazuhcoverage [-i|--ignore-history] [-n|--no-stats] [-s|--strict] TARGET [TARGET...]
+wazuhcoverage (-V|--version)
+wazuhcoverage (-h|--help)
 ```
 
 There are no subcommands. Each `TARGET` is a literal path or a glob; `**` recurses. Quote globs so the shell does not expand them first. Multiple targets are allowed, overlapping matches are deduplicated, and archives are processed in sorted path order. Flags may appear before or after the targets.
@@ -65,8 +67,10 @@ There are no subcommands. Each `TARGET` is a literal path or a glob; `**` recurs
 | `-i` | `--ignore-history` | Process an archive even if `history.db` already lists it. A successful run still records the path. |
 | `-n` | `--no-stats` | Write only one representative log line per finding to stdout, one per row. Everything else goes to stderr. |
 | `-s` | `--strict` | Reject the whole archive on the first unparseable line instead of skipping and counting it. |
+| `-V` | `--version` | Print the installed version and exit. Needs no target. |
+| `-h` | `--help` | Print usage and exit. |
 
-All three short flags take no value, so they can be merged into one cluster in any order. These are equivalent:
+The three behaviour flags take no value, so they can be merged into one cluster in any order. These are equivalent:
 
 ```bash
 wazuhcoverage -ins "/archives/**/*.json.gz"
@@ -80,6 +84,8 @@ wazuhcoverage --ignore-history --no-stats --strict "/archives/**/*.json.gz"
 | `0` | Every matched archive was processed. |
 | `1` | At least one archive failed, or the downstream pipe closed early. |
 | `2` | No target matched, or `history.db` could not be read. |
+
+`--version` prints `wazuhcoverage <version>` to stdout and exits `0` without needing a target, so it is safe to call from a health check or a deployment script. The number it prints is the same one the installed distribution carries; `pyproject.toml` reads it from `wazuhcoverage.__version__`, so the two cannot disagree.
 
 Progress lines, warnings, and the closing `Matched / Processed / Skipped / Failed` summary always go to stderr. Only the report or the samples go to stdout, so redirecting stdout gives you a clean file either way. One failing archive does not stop the run; the others still process and the failure is named on stderr.
 

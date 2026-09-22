@@ -4,7 +4,9 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "wazuhcoverage"
-version = "0.4.0"
+# Read from wazuhcoverage.__version__ so the number the CLI prints and the
+# number the distribution carries cannot drift apart.
+dynamic = ["version"]
 description = "Analyze coverage in Wazuh JSON archives using DuckDB"
 readme = "README.md"
 license = "GPL-2.0-only"
@@ -68,6 +70,9 @@ wazuhcoverage = "wazuhcoverage.cli:main"
 Homepage = "https://github.com/zbalkan/wazuhcoverage"
 Repository = "https://github.com/zbalkan/wazuhcoverage"
 Issues = "https://github.com/zbalkan/wazuhcoverage/issues"
+
+[tool.setuptools.dynamic]
+version = { attr = "wazuhcoverage.__version__" }
 
 [tool.setuptools.packages.find]
 where = ["src"]

@@ -18,6 +18,27 @@ def test_cli_flags_and_targets() -> None:
     assert args.targets == ["/archives/**/*.json.gz", "/other/a.json.gz"]
 
 
+def test_version_flag_prints_the_package_version(capsys) -> None:
+    import wazuhcoverage
+
+    for flag in ("-V", "--version"):
+        with pytest.raises(SystemExit) as exit_info:
+            cli.build_parser().parse_args([flag])
+
+        assert exit_info.value.code == 0
+        assert capsys.readouterr().out.strip() == f"wazuhcoverage {wazuhcoverage.__version__}"
+
+
+def test_version_needs_no_target() -> None:
+    # TARGET is nargs="+", so anything that reads as a normal flag would make
+    # "wazuhcoverage --version" fail on a missing argument. The version action
+    # prints and exits before that check, which is the point of using it.
+    with pytest.raises(SystemExit) as exit_info:
+        cli.build_parser().parse_args(["--version"])
+
+    assert exit_info.value.code == 0
+
+
 def test_short_flags_mirror_the_long_ones() -> None:
     parser = cli.build_parser()
 
