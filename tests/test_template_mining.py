@@ -205,3 +205,24 @@ def test_a_high_cardinality_family_collapses_to_one_finding(tmp_path: Path) -> N
 
     assert len(result.findings) == 1
     assert result.findings[0].event_count == len(rows)
+
+
+def test_cluster_eviction_keeps_prior_assignments(tmp_path: Path, monkeypatch) -> None:
+    archive = tmp_path / "archives.json"
+    rows = [
+        _undecoded("alpha", "001"),
+        _undecoded("bravo charlie", "002"),
+        _undecoded("delta echo foxtrot", "003"),
+    ]
+    _write_jsonl(archive, rows)
+
+    # Different token counts force separate clusters. A cap of one therefore
+    # evicts on every insertion after the first and exercises the production
+    # safety valve without constructing more than 50,000 distinct messages.
+    monkeypatch.setattr("wazuhcoverage.analysis._DRAIN_MAX_CLUSTERS", 1)
+
+    result = analyze_archive(archive)
+
+    assert result.total_events == len(rows)
+    assert len(result.findings) == len(rows)
+    assert sum(finding.event_count for finding in result.findings) == len(rows)

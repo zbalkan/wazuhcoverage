@@ -414,12 +414,19 @@ def _create_template_map(connection: Any, miner: Any) -> None:
     rows = connection.execute("SELECT log_id, normalized_log FROM distinct_logs ORDER BY log_id").fetchall()
 
     # The template a message receives when it is inserted can still widen as
-    # later messages join the same cluster, so the cluster is recorded during
-    # the pass and the final template is read back only once every message has
-    # been seen. Mapping on the insertion-time template would split a cluster.
-    assignments = [(int(row[0]), miner.add_log_message(str(row[1]))["cluster_id"]) for row in rows]
+    # later messages join the same cluster. Keep the most recently returned
+    # template for every cluster so all of its assignments use the final value.
+    # This also preserves the last template of an LRU-evicted cluster: reading
+    # only miner.drain.clusters after the pass would lose it and make the safety
+    # cap turn into a KeyError as soon as the first eviction occurred.
+    assignments = []
+    mined: dict[int, str] = {}
+    for log_id, normalized_log in rows:
+        result = miner.add_log_message(str(normalized_log))
+        cluster_id = int(result["cluster_id"])
+        assignments.append((int(log_id), cluster_id))
+        mined[cluster_id] = str(result["template_mined"])
 
-    mined = {cluster.cluster_id: cluster.get_template() for cluster in miner.drain.clusters}
     # Two clusters can carry the same template text once eviction recreates one,
     # so text is the key and such clusters land in a single finding.
     template_ids = {
