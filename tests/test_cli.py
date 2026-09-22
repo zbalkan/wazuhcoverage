@@ -1,5 +1,6 @@
 import gzip
 import io
+import sys
 from dataclasses import replace
 from pathlib import Path
 
@@ -564,6 +565,7 @@ def test_the_probe_happens_before_the_first_archive_is_read(
     capsys.readouterr()
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="Wazuh Manager is not supported on Windows")
 def test_offline_run_assumes_wazuh_default_threshold(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys
 ) -> None:
@@ -588,9 +590,13 @@ def test_offline_run_assumes_wazuh_default_threshold(
     captured = capsys.readouterr()
 
     assert analyzed == [{"alert_threshold": 3, "skip_malformed": True}]
-    assert "Alert threshold: 3 (Wazuh default assumed; could not read /var/ossec/etc/ossec.conf)" in captured.out
+    assert (
+        f"Alert threshold: 3 (Wazuh default assumed; could not read {cli.DEFAULT_OSSEC_CONF})"
+        in captured.out
+    )
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="Wazuh Manager is not supported on Windows")
 def test_online_run_reads_threshold_once_and_reports_source(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys
 ) -> None:
@@ -603,7 +609,11 @@ def test_online_run_reads_threshold_once_and_reports_source(
 
     monkeypatch.setattr(cli, "resolve_targets", lambda _targets: archives)
     monkeypatch.setattr(cli, "unavailable_reason", lambda: None)
-    monkeypatch.setattr(cli, "read_alert_threshold", lambda: reads.append(1) and 6)
+    def read_threshold() -> int:
+        reads.append(1)
+        return 6
+
+    monkeypatch.setattr(cli, "read_alert_threshold", read_threshold)
     monkeypatch.setattr(
         cli,
         "analyze_archive",
@@ -620,7 +630,7 @@ def test_online_run_reads_threshold_once_and_reports_source(
         {"alert_threshold": 6, "skip_malformed": True},
     ]
     assert captured.out.count(
-        "Alert threshold: 6 (from /var/ossec/etc/ossec.conf)"
+        f"Alert threshold: 6 (from {cli.DEFAULT_OSSEC_CONF})"
     ) == 2
 
 
