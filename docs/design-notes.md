@@ -71,9 +71,11 @@ drain3 is configured explicitly rather than from a `drain3.ini`, because the lib
 
 ### Cost and the cluster cap
 
-DuckDB deduplicates messages before mining, so repeated events are cheap, but the mining cost depends on both the archive's vocabulary and the number of candidate clusters in a Drain leaf. With the current syslog normalization and tree depth, the leading `<TIMESTAMP>` token provides no useful routing; unique-heavy input can therefore approach a pairwise scan until the cluster cap is reached. Measured on structure-free input, 60,000 distinct shapes took 103 seconds, and 120,000 took 1,373 seconds while peaking at 127 MB.
+DuckDB deduplicates messages before mining, so repeated events are cheap, but stock Drain's cost depends on both the archive's vocabulary and the number of candidate clusters in a prefix-tree leaf. With the current syslog normalization and tree depth, the leading `<TIMESTAMP>` token provides no useful routing; unique-heavy input therefore made stock Drain approach a pairwise scan. It took 103 seconds for 60,000 structure-free messages and 1,373 seconds for 120,000 while peaking at 127 MB.
 
-Capping the live clusters bounds the candidate scan: the same 120,000 shapes took 449 seconds and 25 MB under the selected 20,000-cluster cap. Eviction is a safety valve and can change grouping after the cap is reached; templates remain keyed by text so a recreated cluster still rejoins its original finding.
+The analyzer adds a positional inverted index over each cluster's non-wildcard template tokens. A length-*n* template needs at least *k* = `ceil(sim_th × n)` exact positional matches, so every valid candidate must occur in the posting list of at least one of any *n − k + 1* message positions. Probing the rarest of those positions discards unrelated clusters before the exact Drain distance calculation. Candidates are then evaluated in the original leaf order, preserving Drain's match and tie semantics; template widening and LRU eviction update the index. Differential tests compare every assignment with stock Drain.
+
+The index makes the measured unique-heavy case close to linear rather than pairwise. The 20,000 live-cluster cap remains a safety bound for candidate-heavy shapes that defeat the index as well as the prefix tree. Eviction can change grouping after the cap is reached; templates remain keyed by text so a recreated cluster still rejoins its original finding.
 
 ### Determinism
 
