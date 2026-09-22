@@ -89,7 +89,7 @@ Drain merges by positional shape, so messages that share a shape but differ in m
 
 ## Archive reading
 
-The archive is scanned once into a temporary DuckDB table, and all subsequent classification, grouping, and sampling runs against that table. Fields are read with `read_ndjson_objects` and explicit JSON path extraction rather than automatic structural inference, which keeps the envelope stable when an archive happens to contain no rule objects or contains empty decoder objects such as `"decoder": {}`.
+The archive is scanned once into a temporary DuckDB table, and all subsequent classification, grouping, and sampling runs against that table. Status totals are derived from the same grouped result as log-type totals instead of rescanning the classified events. Fields are read with `read_ndjson_objects` and explicit JSON path extraction rather than automatic structural inference, which keeps the envelope stable when an archive happens to contain no rule objects or contains empty decoder objects such as `"decoder": {}`.
 
 ### Malformed lines
 
@@ -100,6 +100,8 @@ The distinction between skipping and ignoring is the whole point: ignoring would
 ### Normalization
 
 The regex pass ahead of mining is deliberately conservative: common timestamp prefixes, UUIDs, hexadecimal tokens of sixteen characters or more, and decimal numbers of five digits or more. Short numbers, IP addresses, ports, usernames, paths, event IDs, and status codes are retained, because masking them can materially change detection semantics and a pattern that hides an event ID is not worth reading.
+
+Normalized mining rows are materialized once and contain only `no_decoder` and `no_alerting_rule` events. `below_threshold` findings bypass both normalization and the template joins because they group directly by rule ID; alerting events need neither operation. This prevents the regex expressions from being recomputed and avoids doing mining-related work for rows that cannot use its result.
 
 ### Bulk loading the template map
 

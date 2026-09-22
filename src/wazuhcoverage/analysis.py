@@ -147,14 +147,18 @@ def analyze_archive(
         _create_finding_views(connection)
 
         malformed_lines = int(connection.execute("SELECT count(*) FROM events WHERE is_malformed").fetchone()[0])
-        total_events = int(connection.execute("SELECT count(*) FROM classified_events").fetchone()[0])
-
-        raw_statuses = {
-            str(status): int(count)
-            for status, count in connection.execute(
-                "SELECT observed_status, count(*) FROM classified_events GROUP BY observed_status"
-            ).fetchall()
-        }
+        raw_log_types = connection.execute(
+            """
+            SELECT observed_status, log_type, count(*) AS event_count
+            FROM classified_events
+            GROUP BY observed_status, log_type
+            ORDER BY event_count DESC, observed_status, log_type
+            """
+        ).fetchall()
+        total_events = sum(int(count) for _, _, count in raw_log_types)
+        raw_statuses = {status: 0 for status in STATUSES}
+        for status, _, count in raw_log_types:
+            raw_statuses[str(status)] += int(count)
 
         # Every status is reported even when it holds no event: a zero bucket is
         # a coverage statement, not missing data. Ties keep the STATUSES order so
@@ -181,14 +185,7 @@ def analyze_archive(
                 percentage=_percentage(int(count), total_events),
                 status_percentage=_percentage(int(count), raw_statuses.get(str(status), 0)),
             )
-            for status, log_type, count in connection.execute(
-                """
-                SELECT observed_status, log_type, count(*) AS event_count
-                FROM classified_events
-                GROUP BY observed_status, log_type
-                ORDER BY event_count DESC, observed_status, log_type
-                """
-            ).fetchall()
+            for status, log_type, count in raw_log_types
         )
 
         findings = tuple(
@@ -356,13 +353,12 @@ def _create_views(connection: Any, alert_threshold: int) -> None:
         """
     )
 
-    # Conservative normalization: common timestamp prefixes, UUIDs, long hex
-    # tokens and long decimal IDs. Short numbers, IPs, ports, usernames, paths,
-    # event IDs and status codes are intentionally retained because they can
-    # materially change detection semantics.
+    # Materialize only the two statuses grouped by message. This evaluates the
+    # conservative normalization once and avoids applying five regexes to alert
+    # rows and below-threshold rows, which group directly by rule ID.
     connection.execute(
         r"""
-        CREATE TEMP VIEW normalized_events AS
+        CREATE TEMP TABLE mined_events AS
         SELECT
             *,
             trim(
@@ -394,6 +390,9 @@ def _create_views(connection: Any, alert_threshold: int) -> None:
                 )
             ) AS normalized_log
         FROM classified_events
+        WHERE observed_status IN ('no_decoder', 'no_alerting_rule')
+          AND full_log IS NOT NULL
+          AND full_log <> ''
         """
     )
 
@@ -409,8 +408,8 @@ def _create_template_map(connection: Any, miner: Any) -> None:
     the message is the only grouping key available to them.
 
     The scan, the deduplication, the join and the counting all stay in DuckDB;
-    Drain only ever sees the distinct normalized strings, which keeps the cost
-    proportional to the archive's vocabulary rather than to its event count.
+    Drain only ever sees the distinct normalized strings, so repeated events
+    do not add mining work.
 
     Drain is order dependent, so distinct messages are fed in sorted order.
     drain3's ``cluster_id`` is deliberately not used as a key: it is assigned in
@@ -429,10 +428,7 @@ def _create_template_map(connection: Any, miner: Any) -> None:
             row_number() OVER (ORDER BY normalized_log) AS log_id
         FROM (
             SELECT DISTINCT normalized_log
-            FROM normalized_events
-            WHERE observed_status IN ('no_decoder', 'no_alerting_rule')
-              AND full_log IS NOT NULL
-              AND full_log <> ''
+            FROM mined_events
         )
         """
     )
@@ -525,7 +521,7 @@ def _create_finding_views(connection: Any) -> None:
     # below_threshold rows always take that path: they are not mined, because a
     # rule ID is already their grouping.
     pattern = "coalesce(t.log_template, n.normalized_log)"
-    source = """normalized_events n
+    source = """mined_events n
         LEFT JOIN distinct_logs d ON d.normalized_log = n.normalized_log
         LEFT JOIN log_templates lt ON lt.log_id = d.log_id
         LEFT JOIN templates t ON t.template_id = lt.template_id"""
@@ -534,37 +530,41 @@ def _create_finding_views(connection: Any) -> None:
         f"""
         CREATE TEMP VIEW finding_events AS
         SELECT
-            n.*,
-            CASE
-                WHEN n.observed_status = 'below_threshold' THEN concat('rule:', coalesce(n.rule_id, 'unknown'))
-                ELSE {pattern}
-            END AS message_pattern,
-            CASE
-                WHEN n.observed_status = 'below_threshold' THEN NULL
-                ELSE n.log_type
-            END AS finding_log_type,
-            CASE
-                WHEN n.observed_status = 'below_threshold' THEN NULL
-                ELSE n.decoder_name
-            END AS finding_decoder,
-            -- Reported for the same reason the decoder is: a below_threshold
-            -- finding spans whatever sources its rule fired on, so claiming
-            -- one of their locations would be arbitrary.
-            CASE
-                WHEN n.observed_status = 'below_threshold' THEN NULL
-                ELSE n.location
-            END AS finding_location,
+            n.observed_status,
+            n.log_type AS finding_log_type,
+            {pattern} AS message_pattern,
+            n.agent_id,
+            n.event_timestamp,
+            n.decoder_name AS finding_decoder,
+            n.location AS finding_location,
+            n.rule_id,
+            n.rule_level,
+            n.full_log,
             md5(to_json(
-                CASE
-                    WHEN n.observed_status = 'below_threshold'
-                        THEN [n.observed_status, coalesce(n.rule_id, 'unknown')]
-                    ELSE [n.observed_status, n.log_type, {pattern}]
-                END
+                [n.observed_status, n.log_type, {pattern}]
             )) AS finding_key
         FROM {source}
-        WHERE n.observed_status <> 'at_or_above_threshold'
-          AND n.full_log IS NOT NULL
-          AND n.full_log <> ''
+
+        UNION ALL
+
+        SELECT
+            observed_status,
+            NULL AS finding_log_type,
+            concat('rule:', coalesce(rule_id, 'unknown')) AS message_pattern,
+            agent_id,
+            event_timestamp,
+            NULL AS finding_decoder,
+            -- A below-threshold finding spans every source its rule fired on,
+            -- so claiming any one location or decoder would be arbitrary.
+            NULL AS finding_location,
+            rule_id,
+            rule_level,
+            full_log,
+            md5(to_json([observed_status, coalesce(rule_id, 'unknown')])) AS finding_key
+        FROM classified_events
+        WHERE observed_status = 'below_threshold'
+          AND full_log IS NOT NULL
+          AND full_log <> ''
         """
     )
 

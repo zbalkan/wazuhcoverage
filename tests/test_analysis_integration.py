@@ -178,6 +178,19 @@ def test_malformed_line_is_skipped_and_counted_not_silently_dropped(tmp_path: Pa
     assert counts["no_decoder"] == 1
 
 
+def test_archive_with_only_malformed_lines_has_zero_classified_totals(tmp_path: Path) -> None:
+    archive = tmp_path / "archives.json"
+    archive.write_text("{not-json}\nnull\n", encoding="utf-8")
+
+    result = analyze_archive(archive)
+
+    assert result.malformed_lines == 2
+    assert result.total_events == 0
+    assert all(item.event_count == 0 for item in result.status_counts)
+    assert result.log_type_counts == ()
+    assert result.findings == ()
+
+
 def test_strict_mode_still_rejects_a_malformed_archive(tmp_path: Path) -> None:
     archive = tmp_path / "archives.json"
     archive.write_text('{"full_log": "valid"}\n{not-json}\n', encoding="utf-8")
