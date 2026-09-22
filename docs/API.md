@@ -1,5 +1,7 @@
 # Python API
 
+This page documents the library interface. Command-line behaviour is documented separately in [CLI.md](CLI.md).
+
 ```python
 from wazuhcoverage import (
     DEFAULT_ALERT_THRESHOLD,
@@ -36,11 +38,11 @@ for finding in analysis.findings:
 
 All models are frozen dataclasses and every collection is a tuple, so a result can be cached or shared without defensive copying. `LogTypeCount.percentage` is the pair's share of the whole archive; `status_percentage` is its share of that one bucket, which ranks a log type inside a small bucket that a whole-archive percentage would flatten to nothing. The package is `py.typed`, and annotations resolve under `typing.get_type_hints()` on every supported interpreter.
 
-Glob expansion, report rendering, stdout and stderr, and exit codes are CLI concerns and are deliberately outside the analysis API.
+Glob expansion, report rendering, stdout and stderr, and exit codes are CLI concerns and are deliberately outside the analysis API; see [CLI.md](CLI.md).
 
 ## Verifying findings
 
-`verify_findings()` is the library side of what the CLI does automatically. It is a separate call rather than an argument to `analyze_archive()`, so analysis stays offline and pure: nothing in `analyze_archive()` opens a socket, and a caller that never imports this function never needs the optional dependency.
+`verify_findings()` is the library side of what the CLI does automatically. It is a separate call rather than an argument to `analyze_archive()`, so analysis stays offline and pure: nothing in `analyze_archive()` opens a socket, and a caller that never imports this function never needs the optional dependency. Replay interpretation limits are documented in [CAVEATS.md](CAVEATS.md).
 
 ```python
 from wazuhcoverage import analyze_archive, verify_findings
