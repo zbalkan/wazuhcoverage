@@ -398,6 +398,26 @@ def test_there_is_no_flag_to_select_replay() -> None:
             parser.parse_args([argument, "a.json"])
 
 
+def test_there_is_no_flag_to_ignore_history() -> None:
+    # -i/--ignore-history went with the processed-path cache. A run keeps no
+    # state, so there is nothing left to ignore, and a script or a README
+    # example still carrying the flag must stop rather than appear to work.
+    parser = cli.build_parser()
+    assert not hasattr(parser.parse_args(["a.json"]), "ignore_history")
+    for argument in ("--ignore-history", "-i", "-sin"):
+        with pytest.raises(SystemExit):
+            parser.parse_args([argument, "a.json"])
+
+
+def test_the_documented_short_flags_still_cluster() -> None:
+    # The README pipes an archive in as `wazuhcoverage -sn`, which only works
+    # while both flags stay single-character store_true options.
+    arguments = cli.build_parser().parse_args(["-sn"])
+
+    assert (arguments.strict, arguments.no_stats) == (True, True)
+    assert arguments.targets == []
+
+
 def test_log_format_keeps_its_documented_default() -> None:
     assert cli.build_parser().parse_args(["a.json"]).log_format == "syslog"
 

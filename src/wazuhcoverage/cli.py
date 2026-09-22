@@ -22,7 +22,7 @@ from wazuhcoverage.verification import DEFAULT_LOG_FORMAT, unavailable_reason, v
 
 # The conventional spelling for "read the archive from standard input". It is
 # also implied when no target is given and stdin is not a terminal, which is
-# what makes `cat archive.json | wazuhcoverage -sin` work.
+# what makes `cat archive.json | wazuhcoverage -sn` work.
 STDIN_TARGET = "-"
 
 # What the report calls a piped archive. A spooled stream has a temporary path
@@ -41,8 +41,8 @@ def build_parser() -> argparse.ArgumentParser:
     # argparse accepts them merged into one cluster (-ns, -sn) as well as
     # separately. Keeping them single-character is what preserves that, and
     # the long forms stay the documented spelling for anything written into a
-    # cron entry or a script. --log-format and --logtest-socket take values, so
-    # they have no short form and cannot join a cluster.
+    # cron entry or a script. --log-format takes a value, so it has no short
+    # form and cannot join a cluster.
     parser = argparse.ArgumentParser(
         prog="wazuhcoverage",
         description="Analyze Wazuh JSON archives and emit coverage statistics or representative samples.",

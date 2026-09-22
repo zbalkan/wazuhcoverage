@@ -64,7 +64,7 @@ wazuhcoverage --no-stats "/var/ossec/logs/archives/2026/**/*.json.gz" | wazuh-lo
 Feed it an archive on standard input, from a file, a decompressor, or a remote host:
 
 ```bash
-cat logs.json | wazuhcoverage -sin
+cat logs.json | wazuhcoverage -sn
 ssh manager "cat /var/ossec/logs/archives/2026/Sep/ossec-archive-18.json.gz" | wazuhcoverage
 ```
 
@@ -124,7 +124,7 @@ There is deliberately no processed-path cache. One would make a run's behaviour 
 An archive can arrive on a pipe instead of as a path. Either spell it as the target `-`, or leave the targets out entirely and let the tool notice that stdin is not a terminal:
 
 ```bash
-cat logs.json | wazuhcoverage -sin
+cat logs.json | wazuhcoverage -sn
 gunzip -c archive.json.gz | wazuhcoverage -
 ssh manager "cat /var/ossec/logs/archives/2026/Sep/ossec-archive-18.json.gz" | wazuhcoverage -n | wazuh-logtest
 ```
