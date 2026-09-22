@@ -266,7 +266,7 @@ def _no_alerting_rule_note(analysis: ArchiveAnalysis) -> list[str]:
     empty Rule and Level for every one of these findings, which reads as "the
     decoder chain dead-ended" when it can equally mean that a level-0 rule
     matched and Wazuh chose not to alert. That difference decides whether a
-    finding is a detection gap or a deliberate silence, and the archive cannot
+    finding is a detection gap or a deliberate suppression, and the archive cannot
     settle it, so the report says so where the findings are read rather than
     leaving it to the documentation.
 

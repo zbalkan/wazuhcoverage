@@ -356,7 +356,7 @@ def test_no_stats_keeps_stdout_machine_clean(monkeypatch: pytest.MonkeyPatch, tm
     assert "Processed: 1" in captured.err
 
 
-def test_a_broken_pipe_stops_the_run_and_silences_stdout(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_a_broken_pipe_stops_the_run_and_suppressions_stdout(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     # A downstream consumer that exits early must not leave the interpreter
     # flushing into a dead pipe at shutdown, which would turn the exit status
     # into 120 regardless of what happened here.

@@ -113,7 +113,7 @@ The replay adds an effective state:
 | --- | --- |
 | `no_decoder` | The replay still does not decode. |
 | `uncovered` | It decodes and no rule matches. |
-| `silenced` | A level-0 rule matches. |
+| `suppressed` | A level-0 rule matches. |
 | `below_threshold` | A rule matches below the alert threshold. |
 | `at_or_above_threshold` | A rule matches at or above the threshold. |
 | `unverified` | Replay did not produce a usable answer. |

@@ -74,7 +74,7 @@ class LogTypeCount:
 EFFECTIVE_STATES = (
     "no_decoder",
     "uncovered",
-    "silenced",
+    "suppressed",
     "below_threshold",
     "at_or_above_threshold",
     "unverified",

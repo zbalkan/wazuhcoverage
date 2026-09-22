@@ -83,7 +83,7 @@ def _install(monkeypatch: pytest.MonkeyPatch, tester: _FakeTester) -> _FakeTeste
     return tester
 
 
-def test_a_level_zero_match_is_silenced_not_uncovered(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_level_zero_match_is_suppressiond_not_uncovered(monkeypatch: pytest.MonkeyPatch) -> None:
     # The whole point of replaying. The archive recorded no rule for this
     # event; logtest reports the rule that matched and its level, so the two
     # outcomes the archive stores identically come apart here.
@@ -103,7 +103,7 @@ def test_a_level_zero_match_is_silenced_not_uncovered(monkeypatch: pytest.Monkey
 
     (result,) = verify_findings(_analysis(_finding("k")))
 
-    assert result.effective_state == "silenced"
+    assert result.effective_state == "suppressed"
     assert (result.rule_id, result.rule_level) == ("61100", 0)
     assert result.rule_groups == ("windows", "windows_system")
     assert result.error is None
@@ -114,7 +114,7 @@ def test_a_level_zero_match_is_silenced_not_uncovered(monkeypatch: pytest.Monkey
     [
         ("NoRule", None, "uncovered"),
         ("NoDecoder", None, "no_decoder"),
-        ("RuleMatch", 0, "silenced"),
+        ("RuleMatch", 0, "suppressed"),
         ("RuleMatch", 2, "below_threshold"),
         ("RuleMatch", 3, "at_or_above_threshold"),
         ("RuleMatch", 12, "at_or_above_threshold"),

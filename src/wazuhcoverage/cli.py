@@ -187,7 +187,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         print(f"wazuhcoverage: {reason}", file=sys.stderr)
         print(
             "wazuhcoverage: reporting from the archive alone, which cannot tell "
-            "an unmatched event from a silenced one; see docs/CAVEATS.md",
+            "an unmatched event from a suppressed one; see docs/CAVEATS.md",
             file=sys.stderr,
         )
 
@@ -204,7 +204,7 @@ def main(argv: Optional[list[str]] = None) -> int:
                     print("wazuhcoverage: read 0 bytes from stdin", file=sys.stderr)
                 _report_one(spooled, STDIN_LABEL, args, replay, alert_threshold, threshold_source)
         except BrokenPipeError:
-            _silence_broken_stdout()
+            _suppression_broken_stdout()
             return 1
         except Exception as exc:  # noqa: BLE001 - a bad stream must not hide the file targets
             failed += 1
@@ -222,7 +222,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         except BrokenPipeError:
             # Redirect the underlying descriptor before interpreter shutdown,
             # so a second flush cannot change the process exit status to 120.
-            _silence_broken_stdout()
+            _suppression_broken_stdout()
             return 1
         except Exception as exc:  # noqa: BLE001 - one bad archive should not block the rest
             failed += 1
@@ -380,7 +380,7 @@ def _stdin_bytes() -> Any:
     return getattr(stream, "buffer", stream)
 
 
-def _silence_broken_stdout() -> None:
+def _suppression_broken_stdout() -> None:
     """Redirect stdout to the null device after a downstream pipe closes."""
 
     try:

@@ -299,7 +299,7 @@ def _verified_analysis() -> ArchiveAnalysis:
         _analysis(),
         findings=(
             Finding(
-                finding_key="silenced",
+                finding_key="suppressed",
                 observed_status="no_alerting_rule",
                 log_type="windows_eventchannel",
                 message_pattern="pattern",
@@ -335,8 +335,8 @@ def _verified_analysis() -> ArchiveAnalysis:
 def _verifications() -> tuple[Verification, ...]:
     return (
         Verification(
-            finding_key="silenced",
-            effective_state="silenced",
+            finding_key="suppressed",
+            effective_state="suppressed",
             logtest_status="RuleMatch",
             decoder="windows_eventchannel",
             rule_id="61100",
@@ -362,7 +362,7 @@ def _verifications() -> tuple[Verification, ...]:
 def test_a_verified_report_names_the_rule_the_archive_omitted() -> None:
     text = render_report(_verified_analysis(), _verifications())
 
-    assert "Effective: silenced (rule 61100, level 0)" in text
+    assert "Effective: suppressed (rule 61100, level 0)" in text
     assert "Matched: Windows System informational event" in text
     assert "Effective: uncovered (rule -, level -)" in text
 
@@ -375,11 +375,11 @@ def test_the_effective_table_weights_states_by_events() -> None:
     rows = [line.split() for line in lines[header + 3 : header + 5]]
 
     assert rows[0] == ["uncovered", "1", "10", "20.00%"]
-    assert rows[1] == ["silenced", "1", "40", "80.00%"]
+    assert rows[1] == ["suppressed", "1", "40", "80.00%"]
 
 
 def test_a_verified_report_drops_the_note_it_has_answered() -> None:
-    # The note exists because the archive cannot separate silenced from
+    # The note exists because the archive cannot separate suppressed from
     # uncovered. Once a replay has, repeating it would be noise.
     assert "Note:" not in render_report(_verified_analysis(), _verifications())
     assert "Note:" in render_report(_verified_analysis())

@@ -2,7 +2,7 @@
 
 An archive records what analysisd committed to, not what it decided. A rule
 that matched at level 0 leaves no rule in the record, so ``no_alerting_rule``
-covers both "nothing matched" and "something matched and was silenced". Nothing
+covers both "nothing matched" and "something matched and was suppressed". Nothing
 in the archive separates them.
 
 wazuh-logtest does. It reports the rule it matched whatever that rule's level
@@ -195,7 +195,7 @@ def _verify_one(
         return _unverified(finding, "the matched rule reported no usable level", status=status, response=response)
 
     if level == 0:
-        state = "silenced"
+        state = "suppressed"
     elif level < alert_threshold:
         state = "below_threshold"
     else:
