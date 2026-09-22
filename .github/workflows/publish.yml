@@ -9,6 +9,11 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    # The version is read once, here, and handed to every job that needs it.
+    # It used to be read again in the tag job, which is how that copy went on
+    # parsing a pyproject key that no longer exists.
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -99,7 +104,9 @@ jobs:
       - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
 
   tag:
-    needs: publish
+    # build is needed for its version output, not for ordering: publish
+    # already depends on it.
+    needs: [build, publish]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -109,13 +116,13 @@ jobs:
           fetch-depth: 0
           ref: ${{ github.sha }}
       - name: Create version tag after publication
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
         run: |
-          VERSION=$(python - <<'PY'
-          import tomllib
-          with open("pyproject.toml", "rb") as handle:
-              print(tomllib.load(handle)["project"]["version"])
-          PY
-          )
+          if [ -z "$VERSION" ]; then
+            echo "The build job produced no version output; refusing to tag."
+            exit 1
+          fi
           TAG="v$VERSION"
           CURRENT_SHA=$(git rev-parse HEAD)
           git fetch --tags --force
