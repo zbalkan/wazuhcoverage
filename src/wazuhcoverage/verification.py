@@ -26,6 +26,7 @@ from __future__ import annotations
 
 from typing import Any, Optional, Union
 
+from wazuhcoverage.analysis import DEFAULT_ALERT_THRESHOLD
 from wazuhcoverage.models import ArchiveAnalysis, Finding, Verification
 
 # The archive statuses worth replaying. below_threshold and
@@ -103,7 +104,7 @@ def unavailable_reason(socket_path: Optional[str] = None) -> Optional[str]:
 def verify_findings(
     analysis: ArchiveAnalysis,
     *,
-    alert_threshold: int = 3,
+    alert_threshold: int = DEFAULT_ALERT_THRESHOLD,
     statuses: tuple[str, ...] = DEFAULT_VERIFIED_STATUSES,
     log_format: str = DEFAULT_LOG_FORMAT,
     socket_path: Optional[str] = None,

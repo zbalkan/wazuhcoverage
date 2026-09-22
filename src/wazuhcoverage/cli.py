@@ -16,6 +16,7 @@ from typing import Any, Optional, TextIO, TypeVar, overload
 
 from wazuhcoverage import __version__
 from wazuhcoverage.analysis import DEFAULT_ALERT_THRESHOLD, analyze_archive
+from wazuhcoverage.config import DEFAULT_OSSEC_CONF, read_alert_threshold
 from wazuhcoverage.models import Verification
 from wazuhcoverage.report import render_report
 from wazuhcoverage.targets import resolve_targets
@@ -179,6 +180,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     # report wondering where it went.
     reason = unavailable_reason()
     replay = reason is None
+    alert_threshold, threshold_source = _resolve_alert_threshold()
     if reason is not None:
         # Two lines rather than one: the reason can be long, and the
         # consequence is the part a reader has to act on.
@@ -200,7 +202,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             with _spooled_stdin() as spooled:
                 if spooled.stat().st_size == 0:
                     print("wazuhcoverage: read 0 bytes from stdin", file=sys.stderr)
-                _report_one(spooled, STDIN_LABEL, args, replay)
+                _report_one(spooled, STDIN_LABEL, args, replay, alert_threshold, threshold_source)
         except BrokenPipeError:
             _silence_broken_stdout()
             return 1
@@ -214,7 +216,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         print(f"Processing {archive}", file=sys.stderr)
 
         try:
-            _report_one(archive, archive, args, replay)
+            _report_one(archive, archive, args, replay, alert_threshold, threshold_source)
             processed += 1
 
         except BrokenPipeError:
@@ -234,7 +236,39 @@ def main(argv: Optional[list[str]] = None) -> int:
     return 1 if failed else 0
 
 
-def _report_one(archive: Path, label: Path, args: argparse.Namespace, replay: bool) -> None:
+def _resolve_alert_threshold() -> tuple[int, str]:
+    """Resolve the local manager threshold, falling back to Wazuh's default."""
+
+    try:
+        configured = read_alert_threshold()
+    except (OSError, ValueError) as exc:
+        print(
+            f"wazuhcoverage: could not read {DEFAULT_OSSEC_CONF}: {exc}; "
+            f"assuming Wazuh default alert threshold {DEFAULT_ALERT_THRESHOLD}",
+            file=sys.stderr,
+        )
+        return (
+            DEFAULT_ALERT_THRESHOLD,
+            f"Wazuh default assumed; could not read {DEFAULT_OSSEC_CONF}",
+        )
+
+    if configured is None:
+        return (
+            DEFAULT_ALERT_THRESHOLD,
+            f"Wazuh default; log_alert_level not set in {DEFAULT_OSSEC_CONF}",
+        )
+
+    return configured, f"from {DEFAULT_OSSEC_CONF}"
+
+
+def _report_one(
+    archive: Path,
+    label: Path,
+    args: argparse.Namespace,
+    replay: bool,
+    alert_threshold: int,
+    threshold_source: str,
+) -> None:
     """Analyze one archive and write its output, raising on failure.
 
     ``label`` is what the reader should see. It differs from ``archive`` only
@@ -243,7 +277,7 @@ def _report_one(archive: Path, label: Path, args: argparse.Namespace, replay: bo
 
     analysis = analyze_archive(
         archive,
-        alert_threshold=DEFAULT_ALERT_THRESHOLD,
+        alert_threshold=alert_threshold,
         skip_malformed=not args.strict,
     )
 
@@ -251,7 +285,7 @@ def _report_one(archive: Path, label: Path, args: argparse.Namespace, replay: bo
     if replay:
         verifications = verify_findings(
             analysis,
-            alert_threshold=DEFAULT_ALERT_THRESHOLD,
+            alert_threshold=alert_threshold,
             log_format=args.log_format,
         )
 
@@ -269,7 +303,14 @@ def _report_one(archive: Path, label: Path, args: argparse.Namespace, replay: bo
             sys.stdout.write(f"{finding.sample_log}\n")
     else:
         rendered = analysis if label == analysis.path else replace(analysis, path=label)
-        sys.stdout.write(render_report(rendered, verifications))
+        sys.stdout.write(
+            render_report(
+                rendered,
+                verifications,
+                alert_threshold=alert_threshold,
+                threshold_source=threshold_source,
+            )
+        )
 
     # A successful flush is part of successful processing. This matters when
     # stdout is a pipe and the downstream consumer exits early.

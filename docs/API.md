@@ -24,7 +24,7 @@ for finding in analysis.findings:
         print(finding.log_type, finding.event_count, finding.sample_log)
 ```
 
-`analyze_archive(path, *, alert_threshold=3, skip_malformed=True)` takes a `str` or `pathlib.Path`, expands `~`, and returns an `ArchiveAnalysis`. It raises `FileNotFoundError` for a missing path and `ValueError` for a negative threshold. Pass `skip_malformed=False` for the fail-fast behaviour `--strict` selects. Grouping is not parameterized, so two analyses of the same archive are always comparable.
+`analyze_archive(path, *, alert_threshold=3, skip_malformed=True)` takes a `str` or `pathlib.Path`, expands `~`, and returns an `ArchiveAnalysis`. The default `3` matches Wazuh's default `log_alert_level`; the library does not read `ossec.conf`, so callers analysing archives from a manager with a different threshold should pass it explicitly. It raises `FileNotFoundError` for a missing path and `ValueError` for a negative threshold. Pass `skip_malformed=False` for the fail-fast behaviour `--strict` selects. Grouping is not parameterized, so two analyses of the same archive are always comparable.
 
 | Model | Fields |
 | --- | --- |

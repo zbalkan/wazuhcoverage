@@ -64,7 +64,7 @@ Every parsed event lands in exactly one observed bucket:
 | Dropped | `no_alerting_rule` | The event decoded, but the archive records no alerting rule. | Replay the sample before treating it as a gap. |
 | Dropped | `below_threshold` | A rule fired below the alert threshold. | Review whether the level is intentional. |
 
-The CLI uses an alert threshold of `3`. The Python API allows callers to choose another threshold.
+The CLI reads `<alerts><log_alert_level>` from `/var/ossec/etc/ossec.conf` when the local manager configuration is available. Otherwise it assumes Wazuh's default threshold of `3`. The report shows both the threshold and its source before the statistics. The Python API keeps the threshold explicit for callers analysing archives elsewhere.
 
 `no_alerting_rule` needs care. A rule-less archive record does not, by itself, prove that no rule was evaluated. Wazuh can produce the same observable archive state for events that require different interpretations. When replay is available, `wazuhcoverage` uses `wazuh-logtest` to refine the result. See [CAVEATS.md](docs/CAVEATS.md) before treating coverage numbers as ground truth.
 
@@ -82,7 +82,7 @@ If the `logtest` extra is installed and the manager socket is usable, the CLI au
 
 Replay answers for the manager being queried now, not necessarily the manager configuration that originally wrote the archive. It also cannot reproduce every stateful rule from one representative event. See [CAVEATS.md](docs/CAVEATS.md) for the interpretation limits and the Wazuh references behind them.
 
-For Wazuh itself, refer to the upstream [wazuh-logtest reference](https://documentation.wazuh.com/current/user-manual/reference/tools/wazuh-logtest.html), [wazuh-analysisd reference](https://documentation.wazuh.com/current/user-manual/reference/daemons/wazuh-analysisd.html#wazuh-analysisd), and [log collection documentation](https://documentation.wazuh.com/current/user-manual/capabilities/log-data-collection/how-it-works.html).
+For Wazuh itself, refer to the upstream [alert-threshold documentation](https://documentation.wazuh.com/current/user-manual/manager/alert-management.html#alert-threshold), [rules classification](https://documentation.wazuh.com/current/user-manual/ruleset/rules/rules-classification.html), [wazuh-logtest reference](https://documentation.wazuh.com/current/user-manual/reference/tools/wazuh-logtest.html), [wazuh-analysisd reference](https://documentation.wazuh.com/current/user-manual/reference/daemons/wazuh-analysisd.html#wazuh-analysisd), and [log collection documentation](https://documentation.wazuh.com/current/user-manual/capabilities/log-data-collection/how-it-works.html).
 
 ## Documentation
 

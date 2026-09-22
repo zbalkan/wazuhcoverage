@@ -248,7 +248,7 @@ def test_no_run_writes_persistent_state(monkeypatch: pytest.MonkeyPatch, tmp_pat
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(cli, "resolve_targets", lambda _targets: [archive])
     monkeypatch.setattr(cli, "analyze_archive", lambda path, **_kwargs: _analysis(path))
-    monkeypatch.setattr(cli, "render_report", lambda _analysis, _verifications=(): "report\n")
+    monkeypatch.setattr(cli, "render_report", lambda _analysis, _verifications=(), **_kwargs: "report\n")
 
     assert cli.main([str(archive)]) == 0
     assert set(tmp_path.iterdir()) == before
@@ -263,7 +263,7 @@ def test_the_same_archive_is_processed_every_run(monkeypatch: pytest.MonkeyPatch
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(cli, "resolve_targets", lambda _targets: [archive])
     monkeypatch.setattr(cli, "analyze_archive", lambda path, **_kwargs: analyzed.append(path) or _analysis(path))
-    monkeypatch.setattr(cli, "render_report", lambda _analysis, _verifications=(): "report\n")
+    monkeypatch.setattr(cli, "render_report", lambda _analysis, _verifications=(), **_kwargs: "report\n")
 
     assert cli.main([str(archive)]) == 0
     assert cli.main([str(archive)]) == 0
@@ -279,7 +279,7 @@ def test_repeated_targets_are_still_read_once(monkeypatch: pytest.MonkeyPatch, t
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(cli, "analyze_archive", lambda path, **_kwargs: _analysis(Path(path)))
-    monkeypatch.setattr(cli, "render_report", lambda _analysis, _verifications=(): "report\n")
+    monkeypatch.setattr(cli, "render_report", lambda _analysis, _verifications=(), **_kwargs: "report\n")
 
     assert cli.main([str(archive), str(archive), "*.json.gz"]) == 0
     assert "Matched: 1 | Processed: 1 | Failed: 0" in capsys.readouterr().err
@@ -307,7 +307,7 @@ def test_cli_forwards_parsing_mode_to_the_analysis(monkeypatch: pytest.MonkeyPat
         "analyze_archive",
         lambda path, **kwargs: received.append(kwargs) or _analysis(path),
     )
-    monkeypatch.setattr(cli, "render_report", lambda _analysis, _verifications=(): "report\n")
+    monkeypatch.setattr(cli, "render_report", lambda _analysis, _verifications=(), **_kwargs: "report\n")
 
     assert cli.main(["--strict", str(archive)]) == 0
     assert received == [{"alert_threshold": 3, "skip_malformed": False}]
@@ -489,11 +489,12 @@ def test_a_reachable_daemon_is_used_without_being_asked(
     monkeypatch.setattr(cli, "resolve_targets", lambda _targets: [archive])
     monkeypatch.setattr(cli, "analyze_archive", lambda path, **_kwargs: _analysis(Path(path)))
     monkeypatch.setattr(cli, "unavailable_reason", lambda: None)
+    monkeypatch.setattr(cli, "read_alert_threshold", lambda: 7)
     monkeypatch.setattr(cli, "verify_findings", lambda analysis, **kwargs: received.append(kwargs) or ())
-    monkeypatch.setattr(cli, "render_report", lambda _analysis, _verifications=(): "report\n")
+    monkeypatch.setattr(cli, "render_report", lambda _analysis, _verifications=(), **_kwargs: "report\n")
 
     assert cli.main(["--log-format", "json", str(archive)]) == 0
-    assert received == [{"alert_threshold": 3, "log_format": "json"}]
+    assert received == [{"alert_threshold": 7, "log_format": "json"}]
     assert "reporting from the archive alone" not in capsys.readouterr().err
 
 
@@ -510,7 +511,7 @@ def test_an_unusable_daemon_warns_once_and_keeps_going(monkeypatch: pytest.Monke
     monkeypatch.setattr(cli, "analyze_archive", lambda path, **_kwargs: _analysis(Path(path)))
     monkeypatch.setattr(cli, "unavailable_reason", lambda: "wazuhtester is not installed")
     monkeypatch.setattr(cli, "verify_findings", lambda *_args, **_kwargs: pytest.fail("must not replay"))
-    monkeypatch.setattr(cli, "render_report", lambda _analysis, _verifications=(): "report\n")
+    monkeypatch.setattr(cli, "render_report", lambda _analysis, _verifications=(), **_kwargs: "report\n")
 
     assert cli.main([str(first), str(second)]) == 0
 
@@ -533,7 +534,7 @@ def test_the_daemon_is_probed_once_not_per_archive(monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(cli, "analyze_archive", lambda path, **_kwargs: _analysis(Path(path)))
     monkeypatch.setattr(cli, "unavailable_reason", lambda: probes.append(1) and None)
     monkeypatch.setattr(cli, "verify_findings", lambda *_args, **_kwargs: ())
-    monkeypatch.setattr(cli, "render_report", lambda _analysis, _verifications=(): "report\n")
+    monkeypatch.setattr(cli, "render_report", lambda _analysis, _verifications=(), **_kwargs: "report\n")
 
     assert cli.main([str(a) for a in archives]) == 0
     assert len(probes) == 1
@@ -556,8 +557,81 @@ def test_the_probe_happens_before_the_first_archive_is_read(
         lambda path, **_kwargs: order.append("analyze") or _analysis(Path(path)),
     )
     monkeypatch.setattr(cli, "unavailable_reason", lambda: order.append("probe") or "no socket")
-    monkeypatch.setattr(cli, "render_report", lambda _analysis, _verifications=(): "report\n")
+    monkeypatch.setattr(cli, "render_report", lambda _analysis, _verifications=(), **_kwargs: "report\n")
 
     assert cli.main([str(archive)]) == 0
     assert order == ["probe", "analyze"]
     capsys.readouterr()
+
+
+def test_offline_run_assumes_wazuh_default_threshold(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys
+) -> None:
+    archive = tmp_path / "archive.json.gz"
+    archive.touch()
+    analyzed: list[dict] = []
+
+    monkeypatch.setattr(cli, "resolve_targets", lambda _targets: [archive])
+    monkeypatch.setattr(cli, "unavailable_reason", lambda: "no manager")
+    monkeypatch.setattr(
+        cli,
+        "read_alert_threshold",
+        lambda: (_ for _ in ()).throw(FileNotFoundError("offline")),
+    )
+    monkeypatch.setattr(
+        cli,
+        "analyze_archive",
+        lambda path, **kwargs: analyzed.append(kwargs) or _analysis(Path(path)),
+    )
+
+    assert cli.main([str(archive)]) == 0
+    captured = capsys.readouterr()
+
+    assert analyzed == [{"alert_threshold": 3, "skip_malformed": True}]
+    assert "Alert threshold: 3 (Wazuh default assumed; could not read /var/ossec/etc/ossec.conf)" in captured.out
+
+
+def test_online_run_reads_threshold_once_and_reports_source(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys
+) -> None:
+    archives = [tmp_path / "a.json.gz", tmp_path / "b.json.gz"]
+    for archive in archives:
+        archive.touch()
+
+    reads: list[int] = []
+    analyzed: list[dict] = []
+
+    monkeypatch.setattr(cli, "resolve_targets", lambda _targets: archives)
+    monkeypatch.setattr(cli, "unavailable_reason", lambda: None)
+    monkeypatch.setattr(cli, "read_alert_threshold", lambda: reads.append(1) and 6)
+    monkeypatch.setattr(
+        cli,
+        "analyze_archive",
+        lambda path, **kwargs: analyzed.append(kwargs) or _analysis(Path(path)),
+    )
+    monkeypatch.setattr(cli, "verify_findings", lambda *_args, **_kwargs: ())
+
+    assert cli.main([str(path) for path in archives]) == 0
+    captured = capsys.readouterr()
+
+    assert len(reads) == 1
+    assert analyzed == [
+        {"alert_threshold": 6, "skip_malformed": True},
+        {"alert_threshold": 6, "skip_malformed": True},
+    ]
+    assert captured.out.count(
+        "Alert threshold: 6 (from /var/ossec/etc/ossec.conf)"
+    ) == 2
+
+
+def test_online_run_assumes_default_when_threshold_cannot_be_read(
+    monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    monkeypatch.setattr(cli, "read_alert_threshold", lambda: (_ for _ in ()).throw(PermissionError("denied")))
+
+    threshold, source = cli._resolve_alert_threshold()
+    captured = capsys.readouterr()
+
+    assert threshold == 3
+    assert "default assumed" in source
+    assert "assuming Wazuh default alert threshold 3" in captured.err

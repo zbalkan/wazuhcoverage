@@ -35,7 +35,13 @@ _AMBIGUOUS_STATUS = "no_alerting_rule"
 _EFFECTIVE_WIDTH = max(24, max(len(state) for state in EFFECTIVE_STATES) + 2)
 
 
-def render_report(analysis: ArchiveAnalysis, verifications: Sequence[Verification] = ()) -> str:
+def render_report(
+    analysis: ArchiveAnalysis,
+    verifications: Sequence[Verification] = (),
+    *,
+    alert_threshold: Optional[int] = None,
+    threshold_source: Optional[str] = None,
+) -> str:
     """Render a compact human-readable report for one archive.
 
     The first table splits the archive into the two outcomes that matter --
@@ -50,15 +56,21 @@ def render_report(analysis: ArchiveAnalysis, verifications: Sequence[Verificatio
     because a replay has since answered that question.
     """
 
-    lines: list[str] = [
-        f"Archive: {analysis.path}",
-        f"Total events: {analysis.total_events:,}",
-        f"Malformed lines skipped: {analysis.malformed_lines:,}",
-        "",
-        "Outcome",
-        "-------",
-        _outcome_row("Outcome", "Events", "% total", "% dropped"),
-    ]
+    lines: list[str] = [f"Archive: {analysis.path}"]
+    if alert_threshold is not None:
+        source = f" ({threshold_source})" if threshold_source else ""
+        lines.append(f"Alert threshold: {alert_threshold}{source}")
+
+    lines.extend(
+        [
+            f"Total events: {analysis.total_events:,}",
+            f"Malformed lines skipped: {analysis.malformed_lines:,}",
+            "",
+            "Outcome",
+            "-------",
+            _outcome_row("Outcome", "Events", "% total", "% dropped"),
+        ]
+    )
 
     lines.extend(_outcome_table(analysis))
 

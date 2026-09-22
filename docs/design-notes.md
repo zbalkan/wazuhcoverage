@@ -12,6 +12,12 @@ When no replay is possible the report prints a note beside the findings, because
 
 `tests/test_analysis_integration.py` pins both the bucket name and the classification of a real archived EventChannel event that logtest resolves to rule `61100` at level 0.
 
+## Alert threshold resolution
+
+The analysis API accepts an explicit threshold and remains independent of manager configuration. The CLI adds local policy on top: it reads `/var/ossec/etc/ossec.conf` once per run and uses `<alerts><log_alert_level>` when present. If the file is absent, unreadable, malformed, or has no configured value, the CLI falls back to Wazuh's default threshold of `3` and makes that assumption visible in the report.
+
+Threshold discovery is independent of replay availability. A manager can have a readable configuration even when the optional `wazuhtester` integration is not installed, and classification should still use the correct local threshold. The same resolved value is passed to both `analyze_archive()` and `verify_findings()` so the observed and effective states cannot disagree merely because they used different thresholds.
+
 ## Verification through logtest
 
 Verification lives in `wazuhcoverage.verification` and nowhere else. `analyze_archive()` opens no socket and gains no parameter for one, so the analysis path stays offline, deterministic, and installable on a laptop; `verify_findings()` is a separate call whose optional dependency a caller that never invokes it never needs.

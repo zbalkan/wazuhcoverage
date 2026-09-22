@@ -20,6 +20,14 @@ This behaviour was verified against Wazuh 4.12 analysisd. The relevant implement
 
 A missing or unusable rule level is therefore not treated as proof of a level-0 match. `wazuhcoverage` classifies what the archive demonstrates and leaves stronger conclusions to replay.
 
+## Alert threshold is configuration-dependent
+
+Coverage classification depends on the manager's `<alerts><log_alert_level>`, not on a universal level of `3`. Wazuh uses `3` as the default, but deployments can configure another value from `1` to `16`.
+
+The CLI reads `/var/ossec/etc/ossec.conf` when it is locally available and reports the resolved threshold before the statistics. When that configuration cannot be read, the CLI explicitly marks `3` as an assumed Wazuh default. An archive does not contain the manager's `log_alert_level`, so offline analysis cannot recover the historical threshold from the archive itself. On a live manager, the value read from `ossec.conf` is the current threshold and may differ from the threshold that was active when an older archive was written.
+
+Library callers analysing data away from the manager should pass the appropriate `alert_threshold` explicitly.
+
 ## Replay can refine the result
 
 `wazuh-logtest` reports the rule selected during testing, including level-0 rules. When the optional replay integration is available, `wazuhcoverage` sends one representative sample per relevant finding and records an effective state beside the archive observation.
@@ -73,6 +81,8 @@ The representative sample remains a real source log, so grouping never removes t
 Use the upstream documentation for Wazuh behaviour and configuration:
 
 - [Archiving event logs](https://documentation.wazuh.com/current/user-manual/manager/event-logging.html#archiving-event-logs)
+- [Alert threshold](https://documentation.wazuh.com/current/user-manual/manager/alert-management.html#alert-threshold)
+- [Rules classification](https://documentation.wazuh.com/current/user-manual/ruleset/rules/rules-classification.html)
 - [wazuh-logtest tool reference](https://documentation.wazuh.com/current/user-manual/reference/tools/wazuh-logtest.html)
 - [wazuh-logtest development reference](https://documentation.wazuh.com/current/development/wazuh-logtest.html)
 - [rule_test configuration](https://documentation.wazuh.com/current/user-manual/reference/ossec-conf/rule-test.html#reference-ossec-rule-test)

@@ -95,7 +95,7 @@ Every parsed event is assigned to exactly one observed bucket:
 | Dropped | `no_alerting_rule` | The event decoded, but the archive records no alerting rule. |
 | Dropped | `below_threshold` | A rule fired below the alert threshold. |
 
-The CLI threshold is `3`. Library callers can choose another threshold; see [API.md](API.md).
+The CLI reads `<alerts><log_alert_level>` from `/var/ossec/etc/ossec.conf` when that local configuration is readable. If it is absent or cannot be read, the CLI assumes Wazuh's documented default of `3`. The resolved value and its provenance are printed near the top of every statistics report, for example `Alert threshold: 6 (from /var/ossec/etc/ossec.conf)` or `Alert threshold: 3 (Wazuh default assumed; could not read /var/ossec/etc/ossec.conf)`. The same resolved value is used for both archive classification and manager replay. Library callers choose the threshold explicitly; see [API.md](API.md).
 
 The report starts with an outcome table, then breaks those outcomes down by log type, followed by grouped findings. `% total` uses all parsed events as its denominator. `% dropped` uses only dropped events, which makes it useful for prioritising the remaining coverage work.
 
@@ -139,6 +139,8 @@ wazuhcoverage --no-stats "/archives/**/*.json.gz" | wazuh-logtest
 For Wazuh behaviour itself, use the upstream documentation rather than this project:
 
 - [Archiving event logs](https://documentation.wazuh.com/current/user-manual/manager/event-logging.html#archiving-event-logs)
+- [Alert threshold](https://documentation.wazuh.com/current/user-manual/manager/alert-management.html#alert-threshold)
+- [Rules classification](https://documentation.wazuh.com/current/user-manual/ruleset/rules/rules-classification.html)
 - [wazuh-logtest tool reference](https://documentation.wazuh.com/current/user-manual/reference/tools/wazuh-logtest.html)
 - [wazuh-logtest development reference](https://documentation.wazuh.com/current/development/wazuh-logtest.html)
 - [rule_test configuration](https://documentation.wazuh.com/current/user-manual/reference/ossec-conf/rule-test.html#reference-ossec-rule-test)
