@@ -18,6 +18,42 @@ def test_cli_flags_and_targets() -> None:
     assert args.targets == ["/archives/**/*.json.gz", "/other/a.json.gz"]
 
 
+def test_short_flags_mirror_the_long_ones() -> None:
+    parser = cli.build_parser()
+
+    short = parser.parse_args(["-i", "-n", "-s", "a.json"])
+    long = parser.parse_args(["--ignore-history", "--no-stats", "--strict", "a.json"])
+
+    assert (short.ignore_history, short.no_stats, short.strict) == (True, True, True)
+    assert vars(short) == vars(long)
+
+
+def test_short_flags_combine_in_any_order() -> None:
+    # Single-character store_true flags are what makes a cluster possible, so
+    # this pins the property rather than the three spellings below: a flag that
+    # grew a value or a second character would silently break "-ins" in a cron
+    # entry that already uses it.
+    parser = cli.build_parser()
+    expected = vars(parser.parse_args(["-i", "-n", "-s", "a.json"]))
+
+    for cluster in ("-ins", "-sin", "-nsi"):
+        assert vars(parser.parse_args([cluster, "a.json"])) == expected
+
+    # A cluster still has to be wholly valid.
+    with pytest.raises(SystemExit):
+        parser.parse_args(["-inx", "a.json"])
+
+
+def test_flags_are_accepted_before_or_after_the_targets() -> None:
+    parser = cli.build_parser()
+
+    leading = parser.parse_args(["-ns", "/archives/a.json", "/archives/b.json"])
+    trailing = parser.parse_args(["/archives/a.json", "/archives/b.json", "-ns"])
+
+    assert vars(leading) == vars(trailing)
+    assert leading.targets == ["/archives/a.json", "/archives/b.json"]
+
+
 def test_cli_exposes_no_engine_switch() -> None:
     # Template mining is the grouping engine, not a mode, so there is nothing
     # to select. A stale --template-mining in a cron entry must fail loudly

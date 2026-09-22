@@ -49,22 +49,31 @@ wazuhcoverage --no-stats "/var/ossec/logs/archives/2026/**/*.json.gz" | wazuh-lo
 Re-read archives you have already processed:
 
 ```bash
-wazuhcoverage --ignore-history "/var/ossec/logs/archives/2026/**/*.json.gz"
+wazuhcoverage -i "/var/ossec/logs/archives/2026/**/*.json.gz"
 ```
 
 ## Command line
 
 ```text
-wazuhcoverage [--ignore-history] [--no-stats] [--strict] TARGET [TARGET...]
+wazuhcoverage [-i|--ignore-history] [-n|--no-stats] [-s|--strict] TARGET [TARGET...]
 ```
 
-There are no subcommands. Each `TARGET` is a literal path or a glob; `**` recurses. Quote globs so the shell does not expand them first. Multiple targets are allowed, overlapping matches are deduplicated, and archives are processed in sorted path order.
+There are no subcommands. Each `TARGET` is a literal path or a glob; `**` recurses. Quote globs so the shell does not expand them first. Multiple targets are allowed, overlapping matches are deduplicated, and archives are processed in sorted path order. Flags may appear before or after the targets.
 
-| Option | Effect |
-| --- | --- |
-| `--ignore-history` | Process an archive even if `history.db` already lists it. A successful run still records the path. |
-| `--no-stats` | Write only one representative log line per finding to stdout, one per row. Everything else goes to stderr. |
-| `--strict` | Reject the whole archive on the first unparseable line instead of skipping and counting it. |
+| Short | Long | Effect |
+| --- | --- | --- |
+| `-i` | `--ignore-history` | Process an archive even if `history.db` already lists it. A successful run still records the path. |
+| `-n` | `--no-stats` | Write only one representative log line per finding to stdout, one per row. Everything else goes to stderr. |
+| `-s` | `--strict` | Reject the whole archive on the first unparseable line instead of skipping and counting it. |
+
+All three short flags take no value, so they can be merged into one cluster in any order. These are equivalent:
+
+```bash
+wazuhcoverage -ins "/archives/**/*.json.gz"
+wazuhcoverage -sin "/archives/**/*.json.gz"
+wazuhcoverage -i -n -s "/archives/**/*.json.gz"
+wazuhcoverage --ignore-history --no-stats --strict "/archives/**/*.json.gz"
+```
 
 | Exit code | Meaning |
 | --- | --- |

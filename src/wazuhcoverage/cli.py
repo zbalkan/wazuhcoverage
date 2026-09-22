@@ -18,21 +18,28 @@ HISTORY_FILE = Path("history.db")
 
 
 def build_parser() -> argparse.ArgumentParser:
+    # Every flag is a single-character store_true, so argparse accepts them
+    # merged into one cluster (-ins, -sin) as well as separately. Keeping them
+    # single-character is what preserves that, and the long forms stay the
+    # documented spelling for anything written into a cron entry or a script.
     parser = argparse.ArgumentParser(
         prog="wazuhcoverage",
         description="Analyze Wazuh JSON archives and emit coverage statistics or representative samples.",
     )
     parser.add_argument(
+        "-i",
         "--ignore-history",
         action="store_true",
         help="Process matching archives even when they are already present in history.db.",
     )
     parser.add_argument(
+        "-n",
         "--no-stats",
         action="store_true",
         help="Write only one representative sample per finding to stdout; suitable for piping to logtest.",
     )
     parser.add_argument(
+        "-s",
         "--strict",
         action="store_true",
         help="Fail an archive on the first unparseable line instead of skipping and counting it.",
