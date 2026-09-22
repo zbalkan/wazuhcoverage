@@ -4,7 +4,7 @@
 
 It works on `archives.json` and `archives.json.gz` produced by `<logall_json>yes</logall_json>`, read-only. By default it is fully offline: it contacts no manager, API, or indexer, so it is safe to run against a copy of an archive on a laptop. Pass `--logtest` and it additionally replays one sample per finding through a Wazuh manager's `wazuh-logtest` socket, which recovers the one thing an archive cannot tell you — whether an event nothing alerted on was unmatched or deliberately silenced.
 
-It ships as a library and a CLI in the same distribution. The CLI is a batch runner for a directory full of daily archives; the library is what you call when you want the numbers in your own program.
+It ships as a library and a CLI in the same distribution. The CLI is a batch runner for a directory full of daily archives; the library is what you call when you want the numbers in your own program. Neither keeps state: a run reads the archives you name, writes its output, and leaves nothing behind.
 
 ## Requirements
 
@@ -70,16 +70,10 @@ cat logs.json | wazuhcoverage -sin
 ssh manager "cat /var/ossec/logs/archives/2026/Sep/ossec-archive-18.json.gz" | wazuhcoverage
 ```
 
-Re-read archives you have already processed:
-
-```bash
-wazuhcoverage -i "/var/ossec/logs/archives/2026/**/*.json.gz"
-```
-
 ## Command line
 
 ```text
-wazuhcoverage [-i|--ignore-history] [-n|--no-stats] [-s|--strict] [-l|--logtest]
+wazuhcoverage [-n|--no-stats] [-s|--strict] [-l|--logtest]
               [--log-format FORMAT] [--logtest-socket PATH] [TARGET...]
 wazuhcoverage (-V|--version)
 wazuhcoverage (-h|--help)
@@ -89,7 +83,6 @@ There are no subcommands. Each `TARGET` is a literal path, a glob, or `-` for st
 
 | Short | Long | Effect |
 | --- | --- | --- |
-| `-i` | `--ignore-history` | Process an archive even if `history.db` already lists it. A successful run still records the path. |
 | `-n` | `--no-stats` | Write only one representative log line per finding to stdout, one per row. Everything else goes to stderr. |
 | `-s` | `--strict` | Reject the whole archive on the first unparseable line instead of skipping and counting it. |
 | `-l` | `--logtest` | Replay one sample per finding through `wazuh-logtest` and report its effective state. Needs the `logtest` extra and a reachable manager. |
@@ -98,24 +91,38 @@ There are no subcommands. Each `TARGET` is a literal path, a glob, or `-` for st
 | `-V` | `--version` | Print the installed version and exit. Needs no target. |
 | `-h` | `--help` | Print usage and exit. |
 
-The four short flags take no value, so they can be merged into one cluster in any order. `--log-format` and `--logtest-socket` take values and cannot join a cluster. These are equivalent:
+The three short behaviour flags take no value, so they can be merged into one cluster in any order. `--log-format` and `--logtest-socket` take values and cannot join a cluster. These are equivalent:
 
 ```bash
-wazuhcoverage -insl "/archives/**/*.json.gz"
-wazuhcoverage -lsin "/archives/**/*.json.gz"
-wazuhcoverage -i -n -s -l "/archives/**/*.json.gz"
-wazuhcoverage --ignore-history --no-stats --strict --logtest "/archives/**/*.json.gz"
+wazuhcoverage -nsl "/archives/**/*.json.gz"
+wazuhcoverage -lsn "/archives/**/*.json.gz"
+wazuhcoverage -n -s -l "/archives/**/*.json.gz"
+wazuhcoverage --no-stats --strict --logtest "/archives/**/*.json.gz"
 ```
 
 | Exit code | Meaning |
 | --- | --- |
 | `0` | Every matched archive was processed. |
 | `1` | At least one archive failed, or the downstream pipe closed early. |
-| `2` | No target was given or matched, or `history.db` could not be read. |
+| `2` | No target was given or matched, or `--logtest` could not reach a manager. |
 
 `--version` prints `wazuhcoverage <version>` to stdout and exits `0` without needing a target, so it is safe to call from a health check or a deployment script. The number it prints is the same one the installed distribution carries; `pyproject.toml` reads it from `wazuhcoverage.__version__`, so the two cannot disagree.
 
-Progress lines, warnings, and the closing `Matched / Processed / Skipped / Failed` summary always go to stderr. Only the report or the samples go to stdout, so redirecting stdout gives you a clean file either way. One failing archive does not stop the run; the others still process and the failure is named on stderr.
+Progress lines, warnings, and the closing `Matched / Processed / Failed` summary always go to stderr. Only the report or the samples go to stdout, so redirecting stdout gives you a clean file either way. One failing archive does not stop the run; the others still process and the failure is named on stderr.
+
+### Repeated runs
+
+A run holds no state. Every archive a target resolves to is read every time, and nothing is written outside stdout and stderr.
+
+Within one run, overlapping targets are still collapsed: `resolve_targets` reduces literal paths and globs to a set of absolute paths, so naming the same archive twice, or matching it with two patterns, reads it once.
+
+Across runs, narrow the targets rather than asking the tool to remember. A dated glob costs nothing and is auditable:
+
+```bash
+wazuhcoverage "/var/ossec/logs/archives/2026/Sep/ossec-archive-$(date +%d).json.gz"
+```
+
+Earlier versions kept a `history.db` of processed paths in the working directory. It is gone, along with `--ignore-history`; passing that flag now fails rather than being accepted as a no-op. A processed-path cache made a run's behaviour depend on where it was launched from and on a file nobody looked at, and it bought only what a glob already gives.
 
 ### Reading from standard input
 
@@ -129,17 +136,11 @@ ssh manager "cat /var/ossec/logs/archives/2026/Sep/ossec-archive-18.json.gz" | w
 
 Plain and gzipped streams both work; the stream is sniffed for gzip's magic number, so nothing needs to be declared. A piped archive may be mixed with path targets, and is always processed first.
 
-Three things differ from analyzing a path, all of them consequences of a stream having no name:
+Two things differ from analyzing a path, both consequences of a stream having no name:
 
-The report calls it `<stdin>` rather than naming the temporary file it was spooled to, so two runs over the same stream produce the same report. It is never recorded in, or skipped because of, `history.db` — piping the same archive twice analyzes it twice, because there is nothing stable to compare against. And it costs temporary disk space of its own size, because DuckDB scans and seeks within a file and a pipe offers neither. For a multi-gigabyte archive that is already on disk, pass the path.
+The report calls it `<stdin>` rather than naming the temporary file it was spooled to, so two runs over the same stream produce the same report. And it costs temporary disk space of its own size, because DuckDB scans and seeks within a file and a pipe offers neither. For a multi-gigabyte archive that is already on disk, pass the path.
 
 If stdin is a terminal and no target is given, the tool asks for one and exits `2` rather than waiting for input that is not coming. If it is a pipe that turns out to be empty, you get an empty report and a `read 0 bytes from stdin` warning on stderr.
-
-### Processing history
-
-The CLI remembers which archives it has already handled in `history.db`, a JSON file written in the current working directory. An archive listed there is skipped on the next run, which is what makes a nightly cron entry over a growing archive directory cheap.
-
-A path is recorded only after analysis finished **and** stdout flushed, so a run that dies partway through, or whose downstream pipe closed, does not mark the archive as done. Delete the file to start over, or pass `--ignore-history` for one run. Piped archives never enter it, and the library API does not use it.
 
 ### Replaying samples through logtest
 
@@ -325,7 +326,7 @@ for finding in analysis.findings:
 
 All models are frozen dataclasses and every collection is a tuple, so a result can be cached or shared without defensive copying. `LogTypeCount.percentage` is the pair's share of the whole archive; `status_percentage` is its share of that one bucket, which ranks a log type inside a small bucket that a whole-archive percentage would flatten to nothing. The package is `py.typed`, and annotations resolve under `typing.get_type_hints()` on every supported interpreter.
 
-Glob expansion, `history.db`, report rendering, stdout and stderr, and exit codes are CLI concerns and are deliberately outside the analysis API.
+Glob expansion, report rendering, stdout and stderr, and exit codes are CLI concerns and are deliberately outside the analysis API.
 
 ### Verifying findings
 
@@ -350,6 +351,8 @@ Widen `statuses` to replay buckets the archive already resolved — useful for a
 ### Compatibility
 
 The status strings carried by `StatusCount.status`, `LogTypeCount.status`, and `Finding.observed_status` are part of the API surface. Version 0.4.0 renamed `no_rule` to `no_alerting_rule`; a consumer matching on the old string must be updated. No alias is provided, because the old name asserted something an archive cannot show.
+
+Version 0.5.0 also removes the `history.db` processed-path cache and the `--ignore-history` / `-i` flag that governed it. A run keeps no state, so `--ignore-history` is now the default and only behaviour; a script still passing the flag exits `2` with a usage error rather than running with a flag that means nothing. Delete any leftover `history.db` and `.history.db.lock`; nothing reads them.
 
 Version 0.5.0 adds `Finding.observed_location`, which the replay needs in order to be faithful. `Finding` is a frozen dataclass, so code constructing one positionally has to be updated; code reading fields by name does not. `EFFECTIVE_STATES` names the replay verdicts and is separate from `STATUSES`, which still names the archive's buckets — the two answer different questions and are deliberately not merged.
 

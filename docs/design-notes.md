@@ -111,11 +111,15 @@ A finding's representative is the deterministic `min()` of its raw logs, with on
 
 `Finding.sample_log` carries the collapsed value, so an API consumer that replays samples gets the same guarantee the CLI does. `message_pattern` is not collapsed, because it is a grouping key and is reported verbatim; the report collapses it only while rendering.
 
-## Processing history
+## No persistent state
 
-`history.db` is a JSON array of successfully processed absolute archive paths, and it is the CLI's only persistent state. Updates are serialized with a small sidecar lock and written atomically.
+The CLI used to keep `history.db`, a JSON array of successfully processed absolute paths, written to the current working directory and guarded by a sidecar lock. It is gone, and with it `--ignore-history`, the atomic-write and locking code, and the recovery path for a corrupt or legacy-pickle history file.
 
-It is a disposable processed-path cache, not an analytics database, and it is not intended to become one. Malformed, legacy-pickle, or structurally invalid history files are never deserialized; such a file is replaced atomically with an empty JSON history and the run continues, because losing a cache is not worth failing a run over.
+It was removed rather than fixed because it answered a question a glob already answers, and it charged for the answer. A run's behaviour depended on which directory it was launched from, so the same command meant different things from `/root` and from a cron working directory. The file was state nobody inspected, whose staleness was invisible until a re-analysis silently did nothing. Skipping was also keyed on the path, not the content, so a rotated archive rewritten under a name already recorded was never re-read.
+
+Deduplication within one run never depended on it: `resolve_targets` collapses literal paths and globs into a set of absolute paths, so overlapping targets are read once whatever the user types. Across runs, narrowing the target is both cheaper and auditable.
+
+What the removal costs is honest: a nightly sweep over a growing archive directory now re-reads what it read yesterday unless its glob is narrowed. A dated glob is one shell expansion, and it puts the decision in the command where it can be read.
 
 ## Dependency constraints
 

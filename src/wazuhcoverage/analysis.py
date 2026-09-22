@@ -88,8 +88,8 @@ def _build_template_miner() -> Any:
     # the conservative masks this project documents, and a second masking pass
     # would silently widen them beyond what the README promises.
     config.masking_instructions = []
-    # No persistence handler: state is per-archive, keeping the CLI's single
-    # piece of persistent state (history.db) as the only thing on disk.
+    # No persistence handler: mined state is per-archive and stays in memory,
+    # which is what lets a run leave nothing on disk behind it.
     return TemplateMiner(config=config)
 
 

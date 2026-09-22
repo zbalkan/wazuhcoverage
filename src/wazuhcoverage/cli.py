@@ -16,12 +16,9 @@ from typing import Any, Optional
 
 from wazuhcoverage import __version__
 from wazuhcoverage.analysis import DEFAULT_ALERT_THRESHOLD, analyze_archive
-from wazuhcoverage.history import History
 from wazuhcoverage.report import render_report
 from wazuhcoverage.targets import resolve_targets
 from wazuhcoverage.verification import DEFAULT_LOG_FORMAT, verify_findings
-
-HISTORY_FILE = Path("history.db")
 
 # The conventional spelling for "read the archive from standard input". It is
 # also implied when no target is given and stdin is not a terminal, which is
@@ -41,8 +38,8 @@ _GZIP_MAGIC = b"\x1f\x8b"
 
 def build_parser() -> argparse.ArgumentParser:
     # The short behaviour flags are single-character store_true options, so
-    # argparse accepts them merged into one cluster (-ins, -sin, -insl) as well
-    # as separately. Keeping them single-character is what preserves that, and
+    # argparse accepts them merged into one cluster (-nsl, -lsn) as well as
+    # separately. Keeping them single-character is what preserves that, and
     # the long forms stay the documented spelling for anything written into a
     # cron entry or a script. --log-format and --logtest-socket take values, so
     # they have no short form and cannot join a cluster.
@@ -59,12 +56,6 @@ def build_parser() -> argparse.ArgumentParser:
         action="version",
         version=f"%(prog)s {__version__}",
         help="Print the installed version and exit.",
-    )
-    parser.add_argument(
-        "-i",
-        "--ignore-history",
-        action="store_true",
-        help="Process matching archives even when they are already present in history.db.",
     )
     parser.add_argument(
         "-n",
@@ -133,12 +124,6 @@ def main(argv: Optional[list[str]] = None) -> int:
         print("wazuhcoverage: no files matched the supplied targets", file=sys.stderr)
         return 2
 
-    try:
-        history = History(HISTORY_FILE)
-    except (OSError, ValueError) as exc:
-        print(f"wazuhcoverage: cannot read {HISTORY_FILE}: {exc}", file=sys.stderr)
-        return 2
-
     # A missing library or an unreachable daemon is a configuration fault, and
     # it is the same fault for every archive. Finding it after scanning thirty
     # of them, or worse, printing reports whose effective column is silently
@@ -151,13 +136,10 @@ def main(argv: Optional[list[str]] = None) -> int:
             return 2
 
     processed = 0
-    skipped = 0
     failed = 0
 
-    # Standard input runs first, and always runs: a stream has no stable path,
-    # so it can neither be looked up in history nor recorded there. Piping the
-    # same archive twice analyzes it twice, which is the only honest answer
-    # when there is nothing to compare against.
+    # Standard input runs first, so a pipeline's own archive is reported ahead
+    # of whatever paths accompany it.
     if read_stdin:
         print("Processing standard input", file=sys.stderr)
         try:
@@ -175,24 +157,15 @@ def main(argv: Optional[list[str]] = None) -> int:
             processed += 1
 
     for archive in targets:
-        if not args.ignore_history and history.contains(archive):
-            skipped += 1
-            continue
-
         print(f"Processing {archive}", file=sys.stderr)
 
         try:
             _report_one(archive, archive, args)
-
-            # History is updated only after analysis and output completed.
-            history.add(archive)
             processed += 1
 
         except BrokenPipeError:
-            # A closed downstream pipe means output did not complete, so do not
-            # mark the current archive as processed. Redirect the underlying
-            # descriptor before interpreter shutdown to avoid a second flush
-            # changing the process exit status to 120.
+            # Redirect the underlying descriptor before interpreter shutdown,
+            # so a second flush cannot change the process exit status to 120.
             _silence_broken_stdout()
             return 1
         except Exception as exc:  # noqa: BLE001 - one bad archive should not block the rest
@@ -201,7 +174,7 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     matched = len(targets) + (1 if read_stdin else 0)
     print(
-        f"Matched: {matched} | Processed: {processed} | Skipped: {skipped} | Failed: {failed}",
+        f"Matched: {matched} | Processed: {processed} | Failed: {failed}",
         file=sys.stderr,
     )
     return 1 if failed else 0

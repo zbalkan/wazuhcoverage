@@ -9,11 +9,9 @@ from wazuhcoverage import ArchiveAnalysis, Finding, cli
 
 
 def test_cli_flags_and_targets() -> None:
-    args = cli.build_parser().parse_args(
-        ["--ignore-history", "--no-stats", "/archives/**/*.json.gz", "/other/a.json.gz"]
-    )
+    args = cli.build_parser().parse_args(["--logtest", "--no-stats", "/archives/**/*.json.gz", "/other/a.json.gz"])
 
-    assert args.ignore_history is True
+    assert args.logtest is True
     assert args.no_stats is True
     assert args.strict is False
     assert args.targets == ["/archives/**/*.json.gz", "/other/a.json.gz"]
@@ -43,10 +41,10 @@ def test_version_needs_no_target() -> None:
 def test_short_flags_mirror_the_long_ones() -> None:
     parser = cli.build_parser()
 
-    short = parser.parse_args(["-i", "-n", "-s", "a.json"])
-    long = parser.parse_args(["--ignore-history", "--no-stats", "--strict", "a.json"])
+    short = parser.parse_args(["-n", "-s", "-l", "a.json"])
+    long = parser.parse_args(["--no-stats", "--strict", "--logtest", "a.json"])
 
-    assert (short.ignore_history, short.no_stats, short.strict) == (True, True, True)
+    assert (short.no_stats, short.strict, short.logtest) == (True, True, True)
     assert vars(short) == vars(long)
 
 
@@ -56,21 +54,21 @@ def test_short_flags_combine_in_any_order() -> None:
     # grew a value or a second character would silently break "-ins" in a cron
     # entry that already uses it.
     parser = cli.build_parser()
-    expected = vars(parser.parse_args(["-i", "-n", "-s", "a.json"]))
+    expected = vars(parser.parse_args(["-n", "-s", "-l", "a.json"]))
 
-    for cluster in ("-ins", "-sin", "-nsi"):
+    for cluster in ("-nsl", "-lsn", "-sln"):
         assert vars(parser.parse_args([cluster, "a.json"])) == expected
 
     # A cluster still has to be wholly valid.
     with pytest.raises(SystemExit):
-        parser.parse_args(["-inx", "a.json"])
+        parser.parse_args(["-nsx", "a.json"])
 
 
 def test_flags_are_accepted_before_or_after_the_targets() -> None:
     parser = cli.build_parser()
 
-    leading = parser.parse_args(["-ns", "/archives/a.json", "/archives/b.json"])
-    trailing = parser.parse_args(["/archives/a.json", "/archives/b.json", "-ns"])
+    leading = parser.parse_args(["-nsl", "/archives/a.json", "/archives/b.json"])
+    trailing = parser.parse_args(["/archives/a.json", "/archives/b.json", "-nsl"])
 
     assert vars(leading) == vars(trailing)
     assert leading.targets == ["/archives/a.json", "/archives/b.json"]
@@ -95,7 +93,7 @@ class _TerminalStdin:
 
 
 def test_targets_are_optional_so_a_pipe_can_supply_one() -> None:
-    assert cli.build_parser().parse_args(["-sin"]).targets == []
+    assert cli.build_parser().parse_args(["-snl"]).targets == []
 
 
 def test_a_piped_archive_is_analyzed_without_a_target(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys) -> None:
@@ -197,29 +195,6 @@ def test_a_terminal_without_a_target_asks_for_one(monkeypatch: pytest.MonkeyPatc
     assert "no target given" in capsys.readouterr().err
 
 
-def test_a_piped_archive_is_never_recorded_in_history(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys) -> None:
-    # A stream has no stable path, so it can be neither looked up nor stored.
-    # Recording the spooled temporary name would grow history.db without ever
-    # skipping anything.
-    class FakeHistory:
-        def __init__(self, _path: Path) -> None:
-            pass
-
-        def contains(self, _path: Path) -> bool:
-            raise AssertionError("a stream must not be looked up in history")
-
-        def add(self, _path: Path) -> None:
-            raise AssertionError("a stream must not be recorded in history")
-
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(cli, "History", FakeHistory)
-    monkeypatch.setattr(cli.sys, "stdin", _PipedStdin(b'{"full_log": "piped"}\n'))
-    monkeypatch.setattr(cli, "analyze_archive", lambda path, **_kwargs: _analysis(Path(path)))
-
-    assert cli.main(["-n"]) == 0
-    capsys.readouterr()
-
-
 def test_a_failing_stream_still_leaves_no_temporary_file(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys
 ) -> None:
@@ -236,6 +211,65 @@ def test_a_failing_stream_still_leaves_no_temporary_file(
     assert cli.main(["-n"]) == 1
     assert seen and not seen[0].exists()
     assert "failed <stdin>" in capsys.readouterr().err
+
+
+def test_the_removed_history_flag_fails_loudly() -> None:
+    # There is no processed-path cache any more, so --ignore-history has
+    # nothing to ignore. A cron entry still passing it must stop rather than
+    # silently run with a flag that means nothing.
+    parser = cli.build_parser()
+    assert not hasattr(parser.parse_args(["a.json"]), "ignore_history")
+    with pytest.raises(SystemExit):
+        parser.parse_args(["--ignore-history", "a.json"])
+    with pytest.raises(SystemExit):
+        parser.parse_args(["-i", "a.json"])
+
+
+def test_no_run_writes_persistent_state(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys) -> None:
+    # The working directory is the one place the CLI used to write. Nothing
+    # should appear there now, lock file included.
+    archive = tmp_path / "archive.json.gz"
+    archive.touch()
+    before = set(tmp_path.iterdir())
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cli, "resolve_targets", lambda _targets: [archive])
+    monkeypatch.setattr(cli, "analyze_archive", lambda path, **_kwargs: _analysis(path))
+    monkeypatch.setattr(cli, "render_report", lambda _analysis, _verifications=(): "report\n")
+
+    assert cli.main([str(archive)]) == 0
+    assert set(tmp_path.iterdir()) == before
+    capsys.readouterr()
+
+
+def test_the_same_archive_is_processed_every_run(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys) -> None:
+    archive = tmp_path / "archive.json.gz"
+    archive.touch()
+    analyzed: list[Path] = []
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cli, "resolve_targets", lambda _targets: [archive])
+    monkeypatch.setattr(cli, "analyze_archive", lambda path, **_kwargs: analyzed.append(path) or _analysis(path))
+    monkeypatch.setattr(cli, "render_report", lambda _analysis, _verifications=(): "report\n")
+
+    assert cli.main([str(archive)]) == 0
+    assert cli.main([str(archive)]) == 0
+    assert analyzed == [archive, archive]
+    capsys.readouterr()
+
+
+def test_repeated_targets_are_still_read_once(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys) -> None:
+    # Dedup within a run never depended on the cache: resolving targets
+    # collapses overlapping globs to a set of absolute paths.
+    archive = tmp_path / "archive.json.gz"
+    archive.write_text("{}\n", encoding="utf-8")
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cli, "analyze_archive", lambda path, **_kwargs: _analysis(Path(path)))
+    monkeypatch.setattr(cli, "render_report", lambda _analysis, _verifications=(): "report\n")
+
+    assert cli.main([str(archive), str(archive), "*.json.gz"]) == 0
+    assert "Matched: 1 | Processed: 1 | Failed: 0" in capsys.readouterr().err
 
 
 def test_cli_exposes_no_engine_switch() -> None:
@@ -297,19 +331,7 @@ def _analysis(path: Path) -> ArchiveAnalysis:
 def test_no_stats_keeps_stdout_machine_clean(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys) -> None:
     archive = tmp_path / "archive.json.gz"
     archive.touch()
-    added: list[Path] = []
 
-    class FakeHistory:
-        def __init__(self, _path: Path) -> None:
-            pass
-
-        def contains(self, _path: Path) -> bool:
-            return False
-
-        def add(self, path: Path) -> None:
-            added.append(path)
-
-    monkeypatch.setattr(cli, "History", FakeHistory)
     monkeypatch.setattr(cli, "resolve_targets", lambda _targets: [archive])
     monkeypatch.setattr(cli, "analyze_archive", lambda path, **_kwargs: _analysis(path))
 
@@ -318,74 +340,14 @@ def test_no_stats_keeps_stdout_machine_clean(monkeypatch: pytest.MonkeyPatch, tm
     assert captured.out == "raw sample\n"
     assert "Processing" in captured.err
     assert "Processed: 1" in captured.err
-    assert added == [archive]
 
 
-def test_ignore_history_processes_hit_and_retains_history(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_a_broken_pipe_stops_the_run_and_silences_stdout(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    # A downstream consumer that exits early must not leave the interpreter
+    # flushing into a dead pipe at shutdown, which would turn the exit status
+    # into 120 regardless of what happened here.
     archive = tmp_path / "archive.json.gz"
     archive.touch()
-    added: list[Path] = []
-    analyzed: list[Path] = []
-
-    class FakeHistory:
-        def __init__(self, _path: Path) -> None:
-            pass
-
-        def contains(self, _path: Path) -> bool:
-            return True
-
-        def add(self, path: Path) -> None:
-            added.append(path)
-
-    monkeypatch.setattr(cli, "History", FakeHistory)
-    monkeypatch.setattr(cli, "resolve_targets", lambda _targets: [archive])
-    monkeypatch.setattr(
-        cli,
-        "analyze_archive",
-        lambda path, **_kwargs: analyzed.append(path) or _analysis(path),
-    )
-    monkeypatch.setattr(cli, "render_report", lambda _analysis, _verifications=(): "report\n")
-
-    assert cli.main(["--ignore-history", str(archive)]) == 0
-    assert analyzed == [archive]
-    assert added == [archive]
-
-
-def test_history_hit_is_skipped(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    archive = tmp_path / "archive.json.gz"
-    archive.touch()
-
-    class FakeHistory:
-        def __init__(self, _path: Path) -> None:
-            pass
-
-        def contains(self, _path: Path) -> bool:
-            return True
-
-        def add(self, _path: Path) -> None:
-            raise AssertionError("skipped archive must not be added")
-
-    monkeypatch.setattr(cli, "History", FakeHistory)
-    monkeypatch.setattr(cli, "resolve_targets", lambda _targets: [archive])
-    monkeypatch.setattr(cli, "analyze_archive", lambda *_args, **_kwargs: pytest.fail("archive should be skipped"))
-
-    assert cli.main([str(archive)]) == 0
-
-
-def test_broken_pipe_does_not_update_history(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    archive = tmp_path / "archive.json.gz"
-    archive.touch()
-    added: list[Path] = []
-
-    class FakeHistory:
-        def __init__(self, _path: Path) -> None:
-            pass
-
-        def contains(self, _path: Path) -> bool:
-            return False
-
-        def add(self, path: Path) -> None:
-            added.append(path)
 
     class BrokenPipeStdout:
         def write(self, _text: str) -> int:
@@ -394,29 +356,17 @@ def test_broken_pipe_does_not_update_history(monkeypatch: pytest.MonkeyPatch, tm
         def flush(self) -> None:
             raise BrokenPipeError
 
-    monkeypatch.setattr(cli, "History", FakeHistory)
     monkeypatch.setattr(cli, "resolve_targets", lambda _targets: [archive])
     monkeypatch.setattr(cli, "analyze_archive", lambda path, **_kwargs: _analysis(path))
     monkeypatch.setattr(cli.sys, "stdout", BrokenPipeStdout())
 
     assert cli.main(["--no-stats", str(archive)]) == 1
-    assert added == []
     assert isinstance(cli.sys.stdout, io.StringIO)
 
 
 def test_no_stats_emits_exactly_one_row_per_finding(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys) -> None:
     archive = tmp_path / "archive.json.gz"
     archive.touch()
-
-    class FakeHistory:
-        def __init__(self, _path: Path) -> None:
-            pass
-
-        def contains(self, _path: Path) -> bool:
-            return False
-
-        def add(self, path: Path) -> None:
-            pass
 
     analysis = _analysis(archive)
     findings = analysis.findings + (
@@ -438,7 +388,6 @@ def test_no_stats_emits_exactly_one_row_per_finding(monkeypatch: pytest.MonkeyPa
     )
     analysis = replace(analysis, findings=findings)
 
-    monkeypatch.setattr(cli, "History", FakeHistory)
     monkeypatch.setattr(cli, "resolve_targets", lambda _targets: [archive])
     monkeypatch.setattr(cli, "analyze_archive", lambda path, **_kwargs: analysis)
 
@@ -454,17 +403,17 @@ def test_no_stats_emits_exactly_one_row_per_finding(monkeypatch: pytest.MonkeyPa
 def test_logtest_joins_the_short_flag_cluster() -> None:
     parser = cli.build_parser()
 
-    expected = vars(parser.parse_args(["-i", "-n", "-s", "-l", "a.json"]))
-    for cluster in ("-insl", "-lsni", "-sil", "-nl"):
+    expected = vars(parser.parse_args(["-n", "-s", "-l", "a.json"]))
+    for cluster in ("-nsl", "-lsn", "-sl", "-nl"):
         merged = vars(parser.parse_args([cluster, "a.json"]))
         assert all(merged[flag] for flag in _flags_in(cluster))
 
-    assert vars(parser.parse_args(["-insl", "a.json"])) == expected
+    assert vars(parser.parse_args(["-nsl", "a.json"])) == expected
     assert parser.parse_args(["a.json"]).logtest is False
 
 
 def _flags_in(cluster: str) -> list[str]:
-    names = {"i": "ignore_history", "n": "no_stats", "s": "strict", "l": "logtest"}
+    names = {"n": "no_stats", "s": "strict", "l": "logtest"}
     return [names[letter] for letter in cluster.lstrip("-")]
 
 
