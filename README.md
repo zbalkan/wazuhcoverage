@@ -93,6 +93,7 @@ For Wazuh itself, refer to the upstream [alert-threshold documentation](https://
 - [Python API](docs/API.md) — analysis models and verification API.
 - [Caveats](docs/CAVEATS.md) — Wazuh behaviours that affect interpretation.
 - [Design notes](docs/DESIGN.md) — implementation rationale, template-mining measurements, and dependency constraints.
+- [Third-party software](docs/THIRD_PARTY.md) — direct dependency license references.
 
 ## Development
 
@@ -105,4 +106,6 @@ python -m ruff format --check .
 
 ## License
 
-GNU General Public License version 2 only. See [LICENSE](LICENSE).
+GNU General Public License version 2 only. See [LICENSE](LICENSE). Direct
+dependencies retain their respective licenses; see the
+[third-party software notice](docs/THIRD_PARTY.md) for license references.
