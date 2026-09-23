@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import math
 from collections import defaultdict
-from typing import DefaultDict, Optional, Sequence
+from collections.abc import Sequence
+from typing import Optional
 
 from drain3.drain import Drain, LogClusterCache, Node
 
@@ -12,7 +13,7 @@ from drain3.drain import Drain, LogClusterCache, Node
 class _IndexedLogClusterCache(LogClusterCache):
     """Notify an indexed Drain when the LRU policy evicts a cluster."""
 
-    def __init__(self, maxsize: int, drain: "IndexedDrain") -> None:
+    def __init__(self, maxsize: int, drain: IndexedDrain) -> None:
         super().__init__(maxsize=maxsize)
         self._drain = drain
 
@@ -35,11 +36,11 @@ class IndexedDrain(Drain):
 
     def __init__(self, *args: object, **kwargs: object) -> None:
         super().__init__(*args, **kwargs)
-        self._postings: DefaultDict[tuple[int, str], set[int]] = defaultdict(set)
+        self._postings: defaultdict[tuple[int, str], set[int]] = defaultdict(set)
         self._indexed_tokens: dict[int, tuple[str, ...]] = {}
         self._cluster_leaf: dict[int, Node] = {}
         self._leaf_by_cluster_list: dict[int, Node] = {}
-        self._stale_per_leaf: DefaultDict[int, int] = defaultdict(int)
+        self._stale_per_leaf: defaultdict[int, int] = defaultdict(int)
         if self.max_clusters is not None:
             self.id_to_cluster = _IndexedLogClusterCache(self.max_clusters, self)
 

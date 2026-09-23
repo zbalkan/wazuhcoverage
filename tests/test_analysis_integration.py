@@ -5,8 +5,8 @@ from pathlib import Path
 import duckdb
 import pytest
 
-from wazuhcoverage import analyze_archive
 from wazuhcoverage import analysis as analysis_module
+from wazuhcoverage import analyze_archive
 
 
 def _write_jsonl(path: Path, rows: list[dict]) -> None:

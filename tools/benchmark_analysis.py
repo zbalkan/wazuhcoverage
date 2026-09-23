@@ -24,8 +24,9 @@ import argparse
 import json
 import tempfile
 import time
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Callable, Iterator
+from typing import Callable
 
 from wazuhcoverage import analyze_archive
 

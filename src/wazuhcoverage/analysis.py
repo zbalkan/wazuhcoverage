@@ -63,6 +63,7 @@ def _build_template_miner() -> Any:
     try:
         from drain3 import TemplateMiner
         from drain3.template_miner_config import TemplateMinerConfig
+
         from wazuhcoverage._drain import IndexedDrain
     except ImportError as exc:  # pragma: no cover - installation error path
         raise RuntimeError("drain3 is required. Install wazuhcoverage with its dependencies.") from exc
