@@ -97,3 +97,18 @@ def test_index_avoids_pairwise_distance_scans_on_unique_messages(monkeypatch) ->
 
     assert calls["stock"] == len(messages) * (len(messages) - 1) // 2
     assert calls["indexed"] == 0
+
+
+def test_empty_candidate_set_does_not_scan_the_prefix_leaf() -> None:
+    class NoIterationList(list):
+        def __iter__(self):
+            raise AssertionError("candidate filtering scanned the full Drain leaf")
+
+    indexed = _drain(IndexedDrain)
+    cluster, _ = indexed.add_log_message("constant alpha bravo charlie delta")
+    leaf = indexed._cluster_leaf[cluster.cluster_id]  # type: ignore[attr-defined]
+    indexed._leaf_by_cluster_list.pop(id(leaf.cluster_ids))  # type: ignore[attr-defined]
+    leaf.cluster_ids = NoIterationList(leaf.cluster_ids)
+    indexed._leaf_by_cluster_list[id(leaf.cluster_ids)] = leaf  # type: ignore[attr-defined]
+
+    assert indexed.fast_match(leaf.cluster_ids, ["unique", "echo", "foxtrot", "golf", "hotel"], 0.56, False) is None

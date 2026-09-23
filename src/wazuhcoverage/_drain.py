@@ -38,6 +38,7 @@ class IndexedDrain(Drain):
         self._postings: DefaultDict[tuple[int, str], set[int]] = defaultdict(set)
         self._indexed_tokens: dict[int, tuple[str, ...]] = {}
         self._cluster_leaf: dict[int, Node] = {}
+        self._leaf_by_cluster_list: dict[int, Node] = {}
         self._stale_per_leaf: DefaultDict[int, int] = defaultdict(int)
         if self.max_clusters is not None:
             self.id_to_cluster = _IndexedLogClusterCache(self.max_clusters, self)
@@ -50,7 +51,9 @@ class IndexedDrain(Drain):
             leaf_key = id(leaf)
             self._stale_per_leaf[leaf_key] += 1
             if self._stale_per_leaf[leaf_key] * 2 >= len(leaf.cluster_ids):
-                leaf.cluster_ids = [candidate for candidate in leaf.cluster_ids if candidate in self.id_to_cluster]
+                # Mutate in place: fast_match uses the list identity to recover
+                # its leaf without scanning every cluster ID.
+                leaf.cluster_ids[:] = [candidate for candidate in leaf.cluster_ids if candidate in self.id_to_cluster]
                 self._stale_per_leaf[leaf_key] = 0
 
     def _remove_postings(self, cluster_id: int, tokens: Optional[tuple[str, ...]]) -> None:
@@ -77,8 +80,10 @@ class IndexedDrain(Drain):
         token_count = len(tokens)
         cur_node = root_node.key_to_child_node.setdefault(str(token_count), Node())
         if token_count == 0:
+            self._leaf_by_cluster_list.pop(id(cur_node.cluster_ids), None)
             cur_node.cluster_ids = [cluster.cluster_id]
             self._cluster_leaf[cluster.cluster_id] = cur_node
+            self._leaf_by_cluster_list[id(cur_node.cluster_ids)] = cur_node
             return
 
         current_depth = 1
@@ -86,6 +91,7 @@ class IndexedDrain(Drain):
             if current_depth >= self.max_node_depth or current_depth >= token_count:
                 cur_node.cluster_ids.append(cluster.cluster_id)
                 self._cluster_leaf[cluster.cluster_id] = cur_node
+                self._leaf_by_cluster_list[id(cur_node.cluster_ids)] = cur_node
                 return
 
             children = cur_node.key_to_child_node
@@ -125,10 +131,18 @@ class IndexedDrain(Drain):
         for _, position, token in probes:
             candidate_ids.update(self._postings.get((position, token), ()))
 
-        # Filtering the leaf list, rather than iterating the set, preserves the
-        # exact tie order used by stock Drain. Stale IDs left by LRU eviction
-        # are harmless and are discarded here along with non-candidates.
-        candidates = [cluster_id for cluster_id in cluster_ids if cluster_id in candidate_ids]
+        # Cluster IDs increase monotonically, which is also their order in a
+        # Drain leaf. Recovering the leaf by list identity lets us preserve that
+        # tie order without scanning a large leaf merely to filter a tiny set.
+        leaf = self._leaf_by_cluster_list.get(id(cluster_ids))
+        if leaf is None:  # Defensive fallback for a drain3 representation change.
+            candidates = [cluster_id for cluster_id in cluster_ids if cluster_id in candidate_ids]
+        else:
+            candidates = sorted(
+                cluster_id
+                for cluster_id in candidate_ids
+                if self._cluster_leaf.get(cluster_id) is leaf and cluster_id in self.id_to_cluster
+            )
         return super().fast_match(candidates, tokens, sim_th, include_params)
 
     def add_log_message(self, content: str):  # type: ignore[no-untyped-def]
