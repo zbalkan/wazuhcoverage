@@ -7,21 +7,12 @@ on:
       - master
       - "roadmap/**"
       - "fix/**"
-    paths-ignore: &documentation-only
+    # Keep documentation-only edits from spending the full test matrix, while
+    # still testing changes to non-Markdown assets and every other file type.
+    paths-ignore: &markdown-only
       - "**/*.md"
-      - "**/*.avif"
-      - "**/*.bmp"
-      - "**/*.gif"
-      - "**/*.ico"
-      - "**/*.jpeg"
-      - "**/*.jpg"
-      - "**/*.png"
-      - "**/*.svg"
-      - "**/*.tif"
-      - "**/*.tiff"
-      - "**/*.webp"
   pull_request:
-    paths-ignore: *documentation-only
+    paths-ignore: *markdown-only
 
 permissions:
   contents: read
