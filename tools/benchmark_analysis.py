@@ -48,17 +48,23 @@ def _realistic_rows(event_count: int) -> Iterator[dict]:
         }
 
 
+def _alphabetic_id(index: int) -> str:
+    """Return a compact lowercase ID that survives numeric normalization."""
+
+    value = index
+    label = ""
+    while True:
+        label = chr(ord("a") + value % 26) + label
+        value = value // 26 - 1
+        if value < 0:
+            return label
+
+
 def _unique_rows(event_count: int) -> Iterator[dict]:
     for index in range(event_count):
-        # Alphabetic IDs survive the production normalizer; decimal IDs of five
-        # or more digits would intentionally collapse to ``<NUM>``.
-        value = index
-        label = ""
-        while True:
-            label = chr(ord("a") + value % 26) + label
-            value = value // 26 - 1
-            if value < 0:
-                break
+        # Decimal IDs of five or more digits would intentionally collapse to
+        # ``<NUM>``, so use an alphabetic identifier instead.
+        label = _alphabetic_id(index)
         unique_tokens = " ".join(f"token{position}-{label}" for position in range(10))
         yield {
             "location": "syslog",
