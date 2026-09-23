@@ -121,6 +121,8 @@ A finding's representative is the deterministic `min()` of its raw logs, with on
 
 A run writes nothing but stdout and stderr. There is no processed-path cache, no lock file, and no flag to bypass one.
 
+DuckDB is in-memory, but it can spill intermediate data under memory pressure. Its spill directory is set explicitly to an owned system-temporary directory rather than the default relative `.tmp`; the connection is closed before that directory is removed, including on analysis errors. The CSV and NDJSON bulk-load files use the system temporary directory and are likewise removed in `finally` blocks.
+
 The obvious design is a JSON list of processed absolute paths in the working directory, skipped on the next run. It answers a question a narrower glob already answers, and it charges for the answer three times over. A run's behaviour comes to depend on the directory it was launched from, so the same command means different things from a shell and from cron. The file is state nobody inspects, whose staleness is invisible until a re-analysis silently does nothing. And skipping keys on the path rather than the content, so an archive rotated under a name already recorded is never re-read — a correctness hole, not merely wasted work.
 
 Deduplication within one run needs none of it: `resolve_targets` collapses literal paths and globs into a set of absolute paths, so overlapping targets are read once whatever the user types.

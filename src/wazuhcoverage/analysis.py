@@ -136,8 +136,13 @@ def analyze_archive(
 
     duckdb = _load_duckdb()
     connection = duckdb.connect(":memory:")
+    spill_directory = tempfile.TemporaryDirectory(prefix="wazuhcoverage-duckdb-")
     try:
         connection.execute("SET TimeZone = 'UTC'")
+        # In-memory DuckDB databases spill to a relative ``.tmp`` directory by
+        # default. Keep spill files in an owned system-temporary directory so
+        # analysis never leaves state in the caller's working directory.
+        connection.execute(f"SET temp_directory = {_sql_literal(spill_directory.name)}")
         _create_events(connection, archive, skip_malformed=skip_malformed)
         _create_views(connection, alert_threshold)
         _create_template_map(connection, _build_template_miner())
@@ -232,7 +237,10 @@ def analyze_archive(
             findings=findings,
         )
     finally:
-        connection.close()
+        try:
+            connection.close()
+        finally:
+            spill_directory.cleanup()
 
 
 def _string_or_none(value: Any) -> Optional[str]:

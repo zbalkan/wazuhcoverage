@@ -6,6 +6,7 @@ import duckdb
 import pytest
 
 from wazuhcoverage import analyze_archive
+from wazuhcoverage import analysis as analysis_module
 
 
 def _write_jsonl(path: Path, rows: list[dict]) -> None:
@@ -161,6 +162,29 @@ def test_empty_archive_returns_zero_counts(tmp_path: Path) -> None:
     assert all(item.event_count == 0 for item in result.status_counts)
     assert result.log_type_counts == ()
     assert result.findings == ()
+
+
+def test_duckdb_spill_directory_is_removed_after_success_and_failure(tmp_path: Path, monkeypatch) -> None:
+    archive = tmp_path / "archives.json"
+    _write_jsonl(archive, [{"full_log": "event", "decoder": {}}])
+    real_temporary_directory = analysis_module.tempfile.TemporaryDirectory
+    created: list[Path] = []
+
+    def tracked_temporary_directory(*args, **kwargs):  # type: ignore[no-untyped-def]
+        directory = real_temporary_directory(*args, **kwargs)
+        if kwargs.get("prefix") == "wazuhcoverage-duckdb-":
+            created.append(Path(directory.name))
+        return directory
+
+    monkeypatch.setattr(analysis_module.tempfile, "TemporaryDirectory", tracked_temporary_directory)
+
+    analyze_archive(archive)
+    archive.write_text("{not-json}\n", encoding="utf-8")
+    with pytest.raises(duckdb.Error):
+        analyze_archive(archive, skip_malformed=False)
+
+    assert len(created) == 2
+    assert all(not path.exists() for path in created)
 
 
 def test_malformed_line_is_skipped_and_counted_not_silently_dropped(tmp_path: Path) -> None:
