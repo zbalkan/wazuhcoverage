@@ -77,6 +77,8 @@ The analyzer adds a positional inverted index over each cluster's non-wildcard t
 
 The index makes the measured unique-heavy case close to linear rather than pairwise: 100,000 distinct messages took 5.5 seconds and one million took 48.5 seconds, with both live clusters and indexed templates remaining at 20,000 after the cap. The cap remains a safety bound for candidate-heavy shapes that defeat the index as well as the prefix tree. Eviction can change grouping after the cap is reached; templates remain keyed by text so a recreated cluster still rejoins its original finding.
 
+`tools/benchmark_analysis.py` makes these checks repeatable through the public `analyze_archive()` path. Its `realistic` workload keeps the normalized vocabulary near 80% of the event count using syslog fields the conservative normalizer deliberately retains; its `unique` workload forces one cluster per message. The tool verifies both the archive total and the sum of finding counts before reporting JSON timings, and writes its generated archives only inside a temporary directory.
+
 ### Determinism
 
 drain3 is order dependent and assigns `cluster_id` in arrival order, so neither could be used as a finding key. Distinct messages are fed to the miner in sorted order, and template IDs are derived from the sorted template text instead.
