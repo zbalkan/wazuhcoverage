@@ -31,7 +31,7 @@ Manager replay is an optional extra. It requires Linux, Python 3.10 or newer, an
 pipx install "wazuhcoverage[logtest]"
 ```
 
-The base package installs DuckDB for archive analysis and drain3 for finding grouping. Dependency constraints and their rationale are documented in [design notes](docs/design-notes.md#dependency-constraints).
+The base package installs DuckDB for archive analysis and drain3 for finding grouping. Dependency constraints and their rationale are documented in [design notes](docs/DESIGN.md#dependency-constraints).
 
 ## Quick start
 
@@ -77,7 +77,7 @@ Raw event counts are usually too noisy to act on directly. `wazuhcoverage` there
 
 `below_threshold` events group by rule ID. `no_decoder` and `no_alerting_rule` events group by log type and a mined message template. Each finding contains its event count, affected agents, observed time range, decoder/rule information where available, a message pattern, and one real source log.
 
-The sample is retained for validation and replay rather than reconstructed from parsed fields. Grouping is deterministic for the same archive. The mining strategy, measurements, and trade-offs are documented in [design-notes.md](docs/design-notes.md#template-mining).
+The sample is retained for validation and replay rather than reconstructed from parsed fields. Grouping is deterministic for the same archive. The mining strategy, measurements, and trade-offs are documented in [DESIGN.md](docs/DESIGN.md#template-mining).
 
 ## Manager replay
 
@@ -92,7 +92,7 @@ For Wazuh itself, refer to the upstream [alert-threshold documentation](https://
 - [Command-line reference](docs/CLI.md) — targets, streams, report semantics, exit codes, and replay behaviour.
 - [Python API](docs/API.md) — analysis models and verification API.
 - [Caveats](docs/CAVEATS.md) — Wazuh behaviours that affect interpretation.
-- [Design notes](docs/design-notes.md) — implementation rationale, template-mining measurements, and dependency constraints.
+- [Design notes](docs/DESIGN.md) — implementation rationale, template-mining measurements, and dependency constraints.
 
 ## Development
 

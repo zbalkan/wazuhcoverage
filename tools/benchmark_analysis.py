@@ -1,6 +1,6 @@
 """Benchmark complete archive analysis on repeatable synthetic workloads.
 
-Two cases isolate the behavior discussed in ``docs/design-notes.md``:
+Two cases isolate the behavior discussed in ``docs/DESIGN.md``:
 
 ``realistic``
     Syslog-shaped authentication messages whose retained users, addresses,

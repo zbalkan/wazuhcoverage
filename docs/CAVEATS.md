@@ -74,7 +74,7 @@ In particular, it can affect fired counters and correlation paths that depend on
 
 For `no_decoder` and `no_alerting_rule`, findings are grouped by log type and message shape. Messages that share a positional shape but differ semantically can still be merged.
 
-The representative sample remains a real source log, so grouping never removes the ability to inspect or replay an example. The miner's tuning, determinism rules, and measured trade-offs are documented in [design-notes.md](design-notes.md#template-mining).
+The representative sample remains a real source log, so grouping never removes the ability to inspect or replay an example. The miner's tuning, determinism rules, and measured trade-offs are documented in [DESIGN.md](DESIGN.md#template-mining).
 
 ## Wazuh references
 

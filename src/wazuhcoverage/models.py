@@ -22,7 +22,7 @@ from typing import Optional
 # the event, while the archive record is queued either way. The JSON formatter
 # then emits a "rule" object only when that pointer survived. A record with no
 # rule therefore means no alerting rule was attached -- three different upstream
-# outcomes that the archive stores identically. See docs/design-notes.md for
+# outcomes that the archive stores identically. See docs/DESIGN.md for
 # the upstream source references.
 STATUSES = (
     "no_decoder",

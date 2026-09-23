@@ -101,7 +101,7 @@ The report starts with an outcome table, then breaks those outcomes down by log 
 
 A finding represents a group of similar uncovered events. It includes event count, affected agents, time range, observed decoder/rule information, a mined message pattern, and one real sample from the archive. The sample is suitable for replay: embedded CR/LF runs are collapsed to one space so one source event remains one input line.
 
-`below_threshold` findings group by rule ID. `no_decoder` and `no_alerting_rule` findings group by log type and a message template mined with drain3. The implementation, determinism rules, and tuning rationale are in [design-notes.md](design-notes.md#template-mining).
+`below_threshold` findings group by rule ID. `no_decoder` and `no_alerting_rule` findings group by log type and a message template mined with drain3. The implementation, determinism rules, and tuning rationale are in [DESIGN.md](DESIGN.md#template-mining).
 
 ## Manager replay
 
