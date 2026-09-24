@@ -3,13 +3,34 @@
 from __future__ import annotations
 
 import csv
+import heapq
 import json
 import os
+import struct
 import tempfile
+from collections.abc import Generator, Iterator
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
-from typing import Any, Optional, Union
+from typing import TYPE_CHECKING, Any, BinaryIO, Optional, Union
 
 from wazuhcoverage.models import STATUSES, ArchiveAnalysis, Finding, LogTypeCount, StatusCount
+
+try:
+    from drain3 import TemplateMiner
+    from drain3.template_miner_config import TemplateMinerConfig
+
+    from wazuhcoverage._drain import IndexedDrain
+except ImportError as exc:  # pragma: no cover - installation error path
+    raise RuntimeError("drain3 is required. Install wazuhcoverage with its dependencies.") from exc
+
+try:
+    import duckdb
+    if TYPE_CHECKING:
+        from duckdb import DuckDBPyConnection
+
+except ImportError as exc:  # pragma: no cover - installation error path
+    raise RuntimeError(
+        "DuckDB is required. Install wazuhcoverage with its dependencies.") from exc
 
 DEFAULT_ALERT_THRESHOLD = 3
 
@@ -20,12 +41,39 @@ def _sql_literal(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
 
 
-def _load_duckdb() -> Any:
-    try:
-        import duckdb
-    except ImportError as exc:  # pragma: no cover - installation error path
-        raise RuntimeError("DuckDB is required. Install wazuhcoverage with its dependencies.") from exc
-    return duckdb
+@contextmanager
+def _connect() -> Generator[DuckDBPyConnection, None, None]:
+    """Open an in-memory DuckDB connection that spills to a private directory.
+
+    Memory and threads are DuckDB's own defaults. The archive is held in
+    memory while it fits and moves to disk when it does not: once DuckDB
+    reaches its memory limit, 80% of physical memory by default, it evicts
+    blocks of the event table and of large sorts, joins and aggregations to its
+    temp directory instead of failing.
+
+    DuckDB's own default spill location is ``.tmp`` under the current working
+    directory, which would make where a run writes depend on where it was
+    launched and fail outright in a read-only directory. The spill directory is
+    therefore created under the system temporary directory, private to this
+    connection, and removed with everything in it once the connection closes.
+    """
+
+    with tempfile.TemporaryDirectory(prefix="wazuhcoverage-duckdb-") as spill_directory:
+        connection: DuckDBPyConnection = duckdb.connect(":memory:", config={"temp_directory": spill_directory})
+        try:
+            # Every join here is written with its small side on the right, and
+            # that side has to stay the build side: the events feeding them
+            # carry logs of up to 64 KiB, and DuckDB estimates how many survive
+            # the finding filter at a few percent of the true count. With the
+            # reordering on, it turned the template join around and built its
+            # hash table from the events, which then needs memory in proportion
+            # to the archive's text rather than to its number of templates.
+            connection.execute("SET disabled_optimizers = 'join_order,build_side_probe_side'")
+            yield connection
+        finally:
+            # Closed before the directory is removed: DuckDB releases its spill
+            # files on close, and Windows refuses to delete a file still open.
+            connection.close()
 
 
 # Drain tuning. The library defaults (sim_th = 0.4, depth = 4) merge log
@@ -55,18 +103,17 @@ _DRAIN_DEPTH = 4
 # keyed by text, so a cluster recreated after an eviction still lands in its
 # original finding.
 _DRAIN_MAX_CLUSTERS = 20_000
+# Raw log text read from DuckDB and sorted in Python at a time, before it is
+# written to disk as one run of the merge that feeds Drain in order. Python
+# holds one run while writing it, and one line per run while merging. It only
+# trades round trips for memory; it has no effect on the result.
+_SORT_RUN_CHARACTERS = 64 * 1024 * 1024
+_ASSIGNMENTS_FILE = "assignments.csv"
+_TEMPLATES_FILE = "templates.ndjson"
 
 
-def _build_template_miner() -> Any:
+def _build_template_miner() -> TemplateMiner:
     """Build the Drain template miner used to group unresolved events."""
-
-    try:
-        from drain3 import TemplateMiner
-        from drain3.template_miner_config import TemplateMinerConfig
-
-        from wazuhcoverage._drain import IndexedDrain
-    except ImportError as exc:  # pragma: no cover - installation error path
-        raise RuntimeError("drain3 is required. Install wazuhcoverage with its dependencies.") from exc
 
     # The config is constructed explicitly because drain3 otherwise loads a
     # drain3.ini from the current working directory, which would make an
@@ -123,6 +170,9 @@ def analyze_archive(
     ``ArchiveAnalysis.malformed_lines``. Skipped lines are excluded from
     ``total_events``, so the coverage denominator stays exact and auditable.
     Pass ``skip_malformed=False`` to reject the archive on the first bad line.
+
+    The analysis runs in memory and spills to a private temporary directory
+    when it outgrows DuckDB's default memory limit, 80% of physical memory.
     """
 
     archive = Path(path).expanduser().resolve()
@@ -135,33 +185,26 @@ def analyze_archive(
     if archive.stat().st_size == 0:
         return _empty_analysis(archive)
 
-    duckdb = _load_duckdb()
-    connection = duckdb.connect(":memory:")
-    spill_directory = tempfile.TemporaryDirectory(prefix="wazuhcoverage-duckdb-")
-    try:
+    return _analyze(archive, alert_threshold, skip_malformed)
+
+
+def _analyze(archive: Path, alert_threshold: int, skip_malformed: bool) -> ArchiveAnalysis:
+    with _connect() as connection:
         connection.execute("SET TimeZone = 'UTC'")
-        # In-memory DuckDB databases spill to a relative ``.tmp`` directory by
-        # default. Keep spill files in an owned system-temporary directory so
-        # analysis never leaves state in the caller's working directory.
-        connection.execute(f"SET temp_directory = {_sql_literal(spill_directory.name)}")
         _create_events(connection, archive, skip_malformed=skip_malformed)
         _create_views(connection, alert_threshold)
         _create_template_map(connection, _build_template_miner())
         _create_finding_views(connection)
 
-        malformed_lines = int(connection.execute("SELECT count(*) FROM events WHERE is_malformed").fetchone()[0])
-        raw_log_types = connection.execute(
-            """
-            SELECT observed_status, log_type, count(*) AS event_count
-            FROM classified_events
-            GROUP BY observed_status, log_type
-            ORDER BY event_count DESC, observed_status, log_type
-            """
-        ).fetchall()
-        total_events = sum(int(count) for _, _, count in raw_log_types)
-        raw_statuses = {status: 0 for status in STATUSES}
-        for status, _, count in raw_log_types:
-            raw_statuses[str(status)] += int(count)
+        malformed_lines = _count_rows(connection, "SELECT count(*) FROM events WHERE is_malformed")
+        total_events = _count_rows(connection, "SELECT count(*) FROM classified_events")
+
+        raw_statuses = {
+            str(status): int(count)
+            for status, count in connection.execute(
+                "SELECT observed_status, count(*) FROM classified_events GROUP BY observed_status"
+            ).fetchall()
+        }
 
         # Every status is reported even when it holds no event: a zero bucket is
         # a coverage statement, not missing data. Ties keep the STATUSES order so
@@ -188,7 +231,14 @@ def analyze_archive(
                 percentage=_percentage(int(count), total_events),
                 status_percentage=_percentage(int(count), raw_statuses.get(str(status), 0)),
             )
-            for status, log_type, count in raw_log_types
+            for status, log_type, count in connection.execute(
+                """
+                SELECT observed_status, log_type, count(*) AS event_count
+                FROM classified_events
+                GROUP BY observed_status, log_type
+                ORDER BY event_count DESC, observed_status, log_type
+                """
+            ).fetchall()
         )
 
         findings = tuple(
@@ -237,11 +287,15 @@ def analyze_archive(
             log_type_counts=log_type_counts,
             findings=findings,
         )
-    finally:
-        try:
-            connection.close()
-        finally:
-            spill_directory.cleanup()
+
+
+def _count_rows(connection: DuckDBPyConnection, query: str) -> int:
+    """Run a scalar count query and return its non-null value."""
+
+    row = connection.execute(query).fetchone()
+    if row is None or len(row) != 1 or row[0] is None:
+        raise RuntimeError("count query returned no scalar value")
+    return int(row[0])
 
 
 def _string_or_none(value: Any) -> Optional[str]:
@@ -269,7 +323,7 @@ def _empty_analysis(archive: Path) -> ArchiveAnalysis:
     )
 
 
-def _create_events(connection: Any, archive: Path, *, skip_malformed: bool) -> None:
+def _create_events(connection: DuckDBPyConnection, archive: Path, *, skip_malformed: bool) -> None:
     archive_sql = _sql_literal(str(archive))
     ignore_errors = "true" if skip_malformed else "false"
 
@@ -326,7 +380,7 @@ def _create_events(connection: Any, archive: Path, *, skip_malformed: bool) -> N
     )
 
 
-def _create_views(connection: Any, alert_threshold: int) -> None:
+def _create_views(connection: DuckDBPyConnection, alert_threshold: int) -> None:
     # The classification reads the archive record and nothing else. The rule
     # branch is the one that cannot be tightened: analysisd abandons a level-0
     # match before it assigns lf->generated_rule, and sets that pointer back to
@@ -341,6 +395,7 @@ def _create_views(connection: Any, alert_threshold: int) -> None:
         f"""
         CREATE TEMP VIEW classified_events AS
         SELECT
+            rowid AS event_id,
             * EXCLUDE (is_malformed),
             CASE
                 WHEN nullif(decoder_name, '') IS NULL THEN 'no_decoder'
@@ -359,51 +414,48 @@ def _create_views(connection: Any, alert_threshold: int) -> None:
         """
     )
 
-    # Materialize only the two statuses grouped by message. This evaluates the
-    # conservative normalization once and avoids applying five regexes to alert
-    # rows and below-threshold rows, which group directly by rule ID.
+    # Conservative normalization: common timestamp prefixes, UUIDs, long hex
+    # tokens and long decimal IDs. Short numbers, IPs, ports, usernames, paths,
+    # event IDs and status codes are intentionally retained because they can
+    # materially change detection semantics. It is a macro rather than a view
+    # column so each step applies it only to the rows it needs: once per mined
+    # event to hash it, and once per distinct message to mine it.
     connection.execute(
         r"""
-        CREATE TEMP TABLE mined_events AS
-        SELECT
-            *,
-            trim(
+        CREATE TEMP MACRO normalize_log(log) AS
+        trim(
+            regexp_replace(
                 regexp_replace(
                     regexp_replace(
                         regexp_replace(
                             regexp_replace(
-                                regexp_replace(
-                                    coalesce(full_log, ''),
-                                    '^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[[:space:]]+[0-9]{1,2}[[:space:]]+[0-9]{2}:[0-9]{2}:[0-9]{2}',
-                                    '<TIMESTAMP>',
-                                    'c'
-                                ),
-                                '^[0-9]{4}-[0-9]{2}-[0-9]{2}[T ][0-9]{2}:[0-9]{2}:[0-9]{2}([.,][0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})?',
+                                coalesce(log, ''),
+                                '^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[[:space:]]+[0-9]{1,2}[[:space:]]+[0-9]{2}:[0-9]{2}:[0-9]{2}',
                                 '<TIMESTAMP>',
                                 'c'
                             ),
-                            '[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}',
-                            '<UUID>',
-                            'g'
+                            '^[0-9]{4}-[0-9]{2}-[0-9]{2}[T ][0-9]{2}:[0-9]{2}:[0-9]{2}([.,][0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})?',
+                            '<TIMESTAMP>',
+                            'c'
                         ),
-                        '\b(0x)?[0-9A-Fa-f]{16,}\b',
-                        '<HEX>',
+                        '[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}',
+                        '<UUID>',
                         'g'
                     ),
-                    '\b[0-9]{5,}\b',
-                    '<NUM>',
+                    '\b(0x)?[0-9A-Fa-f]{16,}\b',
+                    '<HEX>',
                     'g'
-                )
-            ) AS normalized_log
-        FROM classified_events
-        WHERE observed_status IN ('no_decoder', 'no_alerting_rule')
-          AND full_log IS NOT NULL
-          AND full_log <> ''
+                ),
+                '\b[0-9]{5,}\b',
+                '<NUM>',
+                'g'
+            )
+        )
         """
     )
 
 
-def _create_template_map(connection: Any, miner: Any) -> None:
+def _create_template_map(connection: DuckDBPyConnection, miner: TemplateMiner) -> None:
     """Mine one Drain template per distinct normalized message.
 
     Only the statuses that group by message text are mined. ``below_threshold``
@@ -413,14 +465,25 @@ def _create_template_map(connection: Any, miner: Any) -> None:
     definition, since the absence of a rule is what puts an event there -- so
     the message is the only grouping key available to them.
 
-    The scan, the deduplication, the join and the counting all stay in DuckDB;
-    Drain only ever sees the distinct normalized strings, so repeated events
-    do not add mining work.
+    Messages are identified by the 128-bit MD5 of their normalized text, and
+    the text itself never enters a hash table or a sort inside DuckDB. A
+    Windows event's message runs to 32,766 characters and its full_log to 64
+    KiB, and DuckDB cannot spill a DISTINCT, an ORDER BY or a hash join whose
+    rows carry text that long: each needed memory in proportion to the
+    archive's distinct text, so no memory limit held. Hashing, grouping and
+    joining on the digest keeps those steps at a few bytes per message, and
+    the text reaches Python by a streaming scan. Two different messages sharing
+    a digest would merge their findings, which at 2^-128 per pair is not a
+    practical risk.
 
     Drain is order dependent, so distinct messages are fed in sorted order.
-    drain3's ``cluster_id`` is deliberately not used as a key: it is assigned in
-    arrival order. Template IDs are derived from the sorted template text
-    instead, so the same archive always produces the same grouping.
+    The sort runs in Python over sorted runs spilled to disk and merged, which
+    bounds its memory; Python orders strings by code point, which is the order
+    DuckDB's binary collation gives UTF-8, so the feed is the one an ORDER BY
+    would produce. drain3's ``cluster_id`` is deliberately not used as a key:
+    it is assigned in arrival order. Template IDs are derived from the
+    template text instead, so the same archive always produces the same
+    grouping.
 
     The mapping tables are always created, empty included, so the finding views
     join against a fixed shape whatever the archive contains.
@@ -428,149 +491,332 @@ def _create_template_map(connection: Any, miner: Any) -> None:
 
     connection.execute(
         """
-        CREATE TEMP TABLE distinct_logs AS
+        CREATE TEMP TABLE event_logs AS
         SELECT
-            normalized_log,
-            row_number() OVER (ORDER BY normalized_log) AS log_id
-        FROM (
-            SELECT DISTINCT normalized_log
-            FROM mined_events
+            event_id,
+            md5_number_upper(normalize_log(full_log)) AS log_hi,
+            md5_number_lower(normalize_log(full_log)) AS log_lo,
+            strlen(full_log) AS log_length
+        FROM classified_events
+        WHERE observed_status IN ('no_decoder', 'no_alerting_rule')
+          AND full_log IS NOT NULL
+          AND full_log <> ''
+        """
+    )
+    # One event per distinct message: the first, by position in the archive.
+    # Which one does not matter, since they all normalize to the same text.
+    # Stored in event order with each raw log's length, which is what lets the
+    # text be read back in bounded chunks by event range; normalization never
+    # lengthens a log, so the raw length is an upper bound on what a chunk holds.
+    connection.execute(
+        """
+        CREATE TEMP TABLE first_logs AS
+        SELECT min(event_id) AS event_id, arg_min(log_length, event_id) AS log_length
+        FROM event_logs
+        GROUP BY log_hi, log_lo
+        ORDER BY event_id
+        """
+    )
+    connection.execute("CREATE TEMP TABLE log_templates (log_hi UBIGINT, log_lo UBIGINT, template_id BIGINT)")
+    connection.execute("CREATE TEMP TABLE templates (template_id BIGINT, log_template VARCHAR)")
+
+    with tempfile.TemporaryDirectory(prefix="wazuhcoverage-mining-") as work:
+        if not _mine(connection, miner, work):
+            return
+        _load_template_map(connection, work)
+
+
+def _mine(connection: DuckDBPyConnection, miner: TemplateMiner, work: str) -> int:
+    """Feed the distinct messages to Drain in sorted order and spool its decisions.
+
+    Two files come out of the pass. The assignments file holds one
+    ``(log_hi, log_lo, cluster_id)`` row per message. The templates file holds
+    one row each time a cluster is created or its template changes, numbered
+    in the order they happened.
+
+    The template a message receives when it is inserted can still widen as
+    later messages join the same cluster, so it is not final until the pass
+    ends. Recording every change and keeping the last one per cluster gives
+    every assignment the final value without holding the assignments in
+    memory. It also preserves the last template of an LRU-evicted cluster:
+    reading only ``miner.drain.clusters`` after the pass would lose it and make
+    the safety cap turn into a missing template as soon as the first eviction
+    occurred.
+
+    Returns the number of messages mined.
+    """
+
+    mined = 0
+    change = 0
+    with ExitStack() as stack:
+        assignments_stream = stack.enter_context(
+            open(os.path.join(work, _ASSIGNMENTS_FILE), "w", newline="", encoding="utf-8")
         )
+        templates_stream = stack.enter_context(
+            open(os.path.join(work, _TEMPLATES_FILE), "w", newline="\n", encoding="utf-8")
+        )
+        assignments = csv.writer(assignments_stream)
+        for normalized_log, log_hi, log_lo in _sorted_messages(connection, work, stack):
+            result = miner.add_log_message(normalized_log)
+            cluster_id = int(result["cluster_id"])
+            assignments.writerow((log_hi, log_lo, cluster_id))
+            if result["change_type"] != "none":
+                change += 1
+                record = {"change": change, "cluster_id": cluster_id, "log_template": str(result["template_mined"])}
+                templates_stream.write(json.dumps(record, ensure_ascii=False) + "\n")
+            mined += 1
+    return mined
+
+
+def _sorted_messages(connection: DuckDBPyConnection, work: str, stack: ExitStack) -> Iterator[tuple[str, int, int]]:
+    """Yield every distinct message once, as ``(text, hi, lo)``, in sorted order.
+
+    The messages are read in chunks of consecutive events holding at most
+    ``_SORT_RUN_CHARACTERS`` of raw log between them. An archive whose distinct
+    text fits one chunk is sorted in memory and yielded directly. Otherwise
+    each chunk is sorted and written to disk as a run, and ``heapq.merge``
+    reads the runs back as one sorted sequence while holding a record per run.
+
+    Each chunk is its own query over an event-ID range, which DuckDB answers
+    from the row groups that range covers. One query streaming every distinct
+    message was not an option: DuckDB either materializes such a result in
+    full -- all of the archive's distinct text -- or, streaming it, spent a
+    tenth of a second on every batch it handed over.
+    """
+
+    chunks = connection.execute(
+        f"""
+        SELECT min(event_id), max(event_id)
+        FROM (
+            SELECT
+                event_id,
+                (sum(log_length) OVER (ORDER BY event_id ROWS UNBOUNDED PRECEDING) - log_length)
+                    // {_SORT_RUN_CHARACTERS} AS chunk
+            FROM first_logs
+        )
+        GROUP BY chunk
+        ORDER BY chunk
+        """
+    ).fetchall()
+
+    if len(chunks) == 1:
+        run = _read_chunk(connection, *chunks[0])
+        run.sort()
+        return iter(run)
+
+    runs = []
+    for index, (first_event, last_event) in enumerate(chunks):
+        run = _read_chunk(connection, first_event, last_event)
+        run.sort()
+        path = os.path.join(work, f"run-{index:06d}.bin")
+        with open(path, "wb") as stream:
+            _write_run(stream, run)
+        del run
+        runs.append(_read_run(stack.enter_context(open(path, "rb"))))  # noqa: SIM115 - the ExitStack closes it
+    return heapq.merge(*runs)
+
+
+def _read_chunk(connection: DuckDBPyConnection, first_event: int, last_event: int) -> list[tuple[str, int, int]]:
+    # A semi-join, with the digest recomputed from the text it selects, so no
+    # join has to carry the log text. The digest travels as its two 64-bit
+    # halves: handing DuckDB's 128-bit integer to Python, or casting it to
+    # text, cost about 100 microseconds a row -- half a minute for 320,000
+    # messages -- where the halves cost about one.
+    return connection.execute(
+        """
+        SELECT normalized_log, md5_number_upper(normalized_log), md5_number_lower(normalized_log)
+        FROM (
+            SELECT normalize_log(full_log) AS normalized_log
+            FROM classified_events
+            WHERE event_id BETWEEN $first AND $last
+              AND event_id IN (SELECT event_id FROM first_logs WHERE event_id BETWEEN $first AND $last)
+        )
+        """,
+        {"first": first_event, "last": last_event},
+    ).fetchall()
+
+
+# A run record: the UTF-8 length of the text, the two digest halves, then the
+# text. Plain struct packing rather than JSON, which cost several microseconds a
+# record each way, or pickle, which would execute whatever a tampered run file
+# told it to.
+_RUN_RECORD = struct.Struct("<IQQ")
+
+
+def _write_run(stream: BinaryIO, run: list[tuple[str, int, int]]) -> None:
+    pack = _RUN_RECORD.pack
+    for normalized_log, log_hi, log_lo in run:
+        text = normalized_log.encode("utf-8")
+        stream.write(pack(len(text), log_hi, log_lo))
+        stream.write(text)
+
+
+def _read_run(stream: BinaryIO) -> Iterator[tuple[str, int, int]]:
+    unpack = _RUN_RECORD.unpack
+    size = _RUN_RECORD.size
+    while True:
+        header = stream.read(size)
+        if not header:
+            return
+        length, log_hi, log_lo = unpack(header)
+        yield stream.read(length).decode("utf-8"), log_hi, log_lo
+
+
+def _load_template_map(connection: DuckDBPyConnection, work: str) -> None:
+    """Load the spooled mining results into ``templates`` and ``log_templates``.
+
+    DuckDB's Python parameter binding costs roughly 140 microseconds per row for
+    bulk data -- 27 seconds for 50,000 templates -- while its file readers load
+    the same rows in a fraction of a second, so the results are handed over as
+    files rather than bound as parameters.
+
+    The assignments file is CSV and carries only integers, so no log text passes
+    through CSV quoting. The template text goes through JSON instead, whose
+    escaping round-trips every delimiter, quote, newline and control character
+    a log can contain. As with messages, templates are matched by digest and
+    their text is read by streaming scans only.
+
+    Two clusters can carry the same template text once eviction recreates one,
+    so text is the key and such clusters land in a single finding: the
+    template ID is the smallest cluster ID carrying that text.
+    """
+
+    changes = (
+        "read_json(?, format = 'newline_delimited', "
+        "columns = {'change': 'BIGINT', 'cluster_id': 'BIGINT', 'log_template': 'VARCHAR'})"
+    )
+    templates_path = os.path.join(work, _TEMPLATES_FILE)
+    connection.execute(
+        f"""
+        CREATE TEMP TABLE cluster_last AS
+        SELECT cluster_id, max(change) AS change
+        FROM {changes}
+        GROUP BY cluster_id
+        """,
+        [templates_path],
+    )
+    connection.execute(
+        f"""
+        CREATE TEMP TABLE cluster_templates AS
+        SELECT r.cluster_id, md5_number(r.log_template) AS template_hash
+        FROM {changes} r
+        JOIN cluster_last l ON l.cluster_id = r.cluster_id AND l.change = r.change
+        """,
+        [templates_path],
+    )
+    connection.execute(
+        """
+        CREATE TEMP TABLE template_ids AS
+        SELECT template_hash, min(cluster_id) AS template_id
+        FROM cluster_templates
+        GROUP BY template_hash
+        """
+    )
+    connection.execute(
+        f"""
+        INSERT INTO templates
+        SELECT r.cluster_id, r.log_template
+        FROM {changes} r
+        JOIN cluster_last l ON l.cluster_id = r.cluster_id AND l.change = r.change
+        JOIN template_ids t ON t.template_id = r.cluster_id
+        """,
+        [templates_path],
+    )
+    connection.execute(
+        """
+        INSERT INTO log_templates
+        SELECT a.log_hi, a.log_lo, t.template_id
+        FROM read_csv(
+            ?,
+            header = false,
+            columns = {'log_hi': 'UBIGINT', 'log_lo': 'UBIGINT', 'cluster_id': 'BIGINT'}
+        ) a
+        JOIN cluster_templates c ON c.cluster_id = a.cluster_id
+        JOIN template_ids t ON t.template_hash = c.template_hash
+        """,
+        [os.path.join(work, _ASSIGNMENTS_FILE)],
+    )
+
+
+def _create_finding_views(connection: DuckDBPyConnection) -> None:
+    # Events reach their template through their message digest, and findings
+    # group on the template ID; the template text is attached only once per
+    # finding, at the end. Keyed on text, the join and the grouping would each
+    # hold every distinct message, which is what no memory limit could bound.
+    connection.execute(
+        """
+        CREATE TEMP VIEW finding_events AS
+        SELECT
+            c.*,
+            lt.template_id,
+            -- A mined event always has a template. Should one ever miss it, the
+            -- event still groups with the others of its exact message rather
+            -- than collapsing into one finding with every other orphan.
+            CASE WHEN c.observed_status <> 'below_threshold' AND lt.template_id IS NULL THEN el.log_hi END
+                AS orphan_hi,
+            CASE WHEN c.observed_status <> 'below_threshold' AND lt.template_id IS NULL THEN el.log_lo END
+                AS orphan_lo,
+            CASE
+                WHEN c.observed_status = 'below_threshold' THEN coalesce(c.rule_id, 'unknown')
+            END AS rule_key,
+            CASE
+                WHEN c.observed_status = 'below_threshold' THEN NULL
+                ELSE c.log_type
+            END AS finding_log_type,
+            CASE
+                WHEN c.observed_status = 'below_threshold' THEN NULL
+                ELSE c.decoder_name
+            END AS finding_decoder,
+            -- Reported for the same reason the decoder is: a below_threshold
+            -- finding spans whatever sources its rule fired on, so claiming
+            -- one of their locations would be arbitrary.
+            CASE
+                WHEN c.observed_status = 'below_threshold' THEN NULL
+                ELSE c.location
+            END AS finding_location
+        FROM classified_events c
+        LEFT JOIN event_logs el ON el.event_id = c.event_id
+        LEFT JOIN log_templates lt ON lt.log_hi = el.log_hi AND lt.log_lo = el.log_lo
+        WHERE c.observed_status <> 'at_or_above_threshold'
+          AND c.full_log IS NOT NULL
+          AND c.full_log <> ''
         """
     )
 
-    rows = connection.execute("SELECT log_id, normalized_log FROM distinct_logs ORDER BY log_id").fetchall()
-
-    # The template a message receives when it is inserted can still widen as
-    # later messages join the same cluster. Keep the most recently returned
-    # template for every cluster so all of its assignments use the final value.
-    # This also preserves the last template of an LRU-evicted cluster: reading
-    # only miner.drain.clusters after the pass would lose it and make the safety
-    # cap turn into a KeyError as soon as the first eviction occurred.
-    assignments = []
-    mined: dict[int, str] = {}
-    for log_id, normalized_log in rows:
-        result = miner.add_log_message(str(normalized_log))
-        cluster_id = int(result["cluster_id"])
-        assignments.append((int(log_id), cluster_id))
-        mined[cluster_id] = str(result["template_mined"])
-
-    # Two clusters can carry the same template text once eviction recreates one,
-    # so text is the key and such clusters land in a single finding.
-    template_ids = {
-        template: index for index, template in enumerate(sorted({mined[cluster] for _, cluster in assignments}))
-    }
-
-    connection.execute("CREATE TEMP TABLE log_templates (log_id BIGINT, template_id INTEGER)")
-    connection.execute("CREATE TEMP TABLE templates (template_id INTEGER, log_template VARCHAR)")
-    if not assignments:
-        return
-
-    _load_log_templates(connection, [(log_id, template_ids[mined[cluster]]) for log_id, cluster in assignments])
-    _load_templates(connection, [(template_id, template) for template, template_id in template_ids.items()])
-
-
-def _load_log_templates(connection: Any, assignments: list[tuple[int, int]]) -> None:
-    """Load the log-ID to template-ID mapping through a temporary CSV file.
-
-    DuckDB's Python parameter binding costs roughly 140 microseconds per row for
-    bulk data -- about 25 seconds for one high-entropy archive -- while its CSV
-    reader loads the same rows in 0.2 seconds. Chunking the binding does not
-    help, so the mapping is handed over as a file instead.
-
-    Only integers are written. No log text passes through CSV quoting, so an
-    embedded delimiter, quote or newline in a message cannot corrupt the join
-    key. The file is removed before this function returns.
-    """
-
-    handle, path = tempfile.mkstemp(prefix="wazuhcoverage-templates-", suffix=".csv")
-    os.close(handle)
-    try:
-        with open(path, "w", newline="", encoding="utf-8") as stream:
-            csv.writer(stream).writerows(assignments)
-        connection.execute(
-            "INSERT INTO log_templates SELECT * FROM "
-            "read_csv(?, header = false, columns = {'log_id': 'BIGINT', 'template_id': 'INTEGER'})",
-            [path],
-        )
-    finally:
-        os.unlink(path)
-
-
-def _load_templates(connection: Any, templates: list[tuple[int, str]]) -> None:
-    """Bulk-load template text through NDJSON instead of per-row bindings."""
-
-    handle, path = tempfile.mkstemp(prefix="wazuhcoverage-template-text-", suffix=".json")
-    os.close(handle)
-    try:
-        with open(path, "w", encoding="utf-8") as stream:
-            for template_id, template in templates:
-                json.dump({"template_id": template_id, "log_template": template}, stream, ensure_ascii=False)
-                stream.write("\n")
-        connection.execute(
-            """
-            INSERT INTO templates
-            SELECT
-                cast(json_extract(json, '$.template_id') AS INTEGER),
-                json_extract_string(json, '$.log_template')
-            FROM read_ndjson_objects(?)
-            """,
-            [path],
-        )
-    finally:
-        os.unlink(path)
-
-
-def _create_finding_views(connection: Any) -> None:
-    # coalesce() keeps the regex-normalized message as the fallback so a row
-    # that somehow missed the join still groups rather than collapsing to NULL.
-    # below_threshold rows always take that path: they are not mined, because a
-    # rule ID is already their grouping.
-    pattern = "coalesce(t.log_template, n.normalized_log)"
-    source = """mined_events n
-        LEFT JOIN distinct_logs d ON d.normalized_log = n.normalized_log
-        LEFT JOIN log_templates lt ON lt.log_id = d.log_id
-        LEFT JOIN templates t ON t.template_id = lt.template_id"""
-
     connection.execute(
-        f"""
-        CREATE TEMP VIEW finding_events AS
-        SELECT
-            n.observed_status,
-            n.log_type AS finding_log_type,
-            {pattern} AS message_pattern,
-            n.agent_id,
-            n.event_timestamp,
-            n.decoder_name AS finding_decoder,
-            n.location AS finding_location,
-            n.rule_id,
-            n.rule_level,
-            n.full_log,
-            md5(to_json(
-                [n.observed_status, n.log_type, {pattern}]
-            )) AS finding_key
-        FROM {source}
-
-        UNION ALL
-
+        """
+        CREATE TEMP VIEW finding_groups AS
         SELECT
             observed_status,
-            NULL AS finding_log_type,
-            concat('rule:', coalesce(rule_id, 'unknown')) AS message_pattern,
-            agent_id,
-            event_timestamp,
-            NULL AS finding_decoder,
-            -- A below-threshold finding spans every source its rule fired on,
-            -- so claiming any one location or decoder would be arbitrary.
-            NULL AS finding_location,
-            rule_id,
-            rule_level,
-            full_log,
-            md5(to_json([observed_status, coalesce(rule_id, 'unknown')])) AS finding_key
-        FROM classified_events
-        WHERE observed_status = 'below_threshold'
-          AND full_log IS NOT NULL
-          AND full_log <> ''
+            finding_log_type,
+            template_id,
+            orphan_hi,
+            orphan_lo,
+            rule_key,
+            count(*) AS event_count,
+            count(DISTINCT agent_id) FILTER (WHERE agent_id IS NOT NULL) AS affected_agents,
+            min(event_timestamp) AS first_timestamp,
+            max(event_timestamp) AS last_timestamp,
+            -- The fields a replay depends on come from the sample's own
+            -- event. Aggregating them separately would pick each from
+            -- whichever row a parallel scan reached first, so the location
+            -- could change between runs and pair the sample with another
+            -- event's source -- and the decoder chain consults the location,
+            -- so that replay could resolve differently from the event that was
+            -- archived. min() over the struct takes the row with the smallest
+            -- raw log and breaks ties on the remaining fields, so the choice is
+            -- total and deterministic.
+            min(
+                {
+                    'full_log': full_log,
+                    'location': finding_location,
+                    'decoder': finding_decoder,
+                    'rule_id': rule_id,
+                    'rule_level': rule_level
+                }
+            ) AS sample
+        FROM finding_events
+        GROUP BY observed_status, finding_log_type, template_id, orphan_hi, orphan_lo, rule_key
         """
     )
 
@@ -580,42 +826,46 @@ def _create_finding_views(connection: Any) -> None:
         r"""
         CREATE TEMP VIEW findings AS
         SELECT
-            finding_key,
-            any_value(observed_status) AS observed_status,
-            any_value(finding_log_type) AS log_type,
-            any_value(message_pattern) AS message_pattern,
-            count(*) AS event_count,
-            count(DISTINCT agent_id) FILTER (WHERE agent_id IS NOT NULL) AS affected_agents,
-            strftime(min(event_timestamp), '%Y-%m-%d %H:%M:%S%z') AS first_seen,
-            strftime(max(event_timestamp), '%Y-%m-%d %H:%M:%S%z') AS last_seen,
-            arg_min(struct_pack(decoder := finding_decoder, location := finding_location,
-                rule := rule_id, level := rule_level),
-                struct_pack(log := full_log, location := coalesce(finding_location, ''),
-                decoder := coalesce(finding_decoder, ''), rule := coalesce(rule_id, ''),
-                level := coalesce(rule_level, -1))).decoder AS observed_decoder,
-            arg_min(struct_pack(decoder := finding_decoder, location := finding_location,
-                rule := rule_id, level := rule_level),
-                struct_pack(log := full_log, location := coalesce(finding_location, ''),
-                decoder := coalesce(finding_decoder, ''), rule := coalesce(rule_id, ''),
-                level := coalesce(rule_level, -1))).location AS observed_location,
-            arg_min(struct_pack(decoder := finding_decoder, location := finding_location,
-                rule := rule_id, level := rule_level),
-                struct_pack(log := full_log, location := coalesce(finding_location, ''),
-                decoder := coalesce(finding_decoder, ''), rule := coalesce(rule_id, ''),
-                level := coalesce(rule_level, -1))).rule AS observed_rule_id,
-            arg_min(struct_pack(decoder := finding_decoder, location := finding_location,
-                rule := rule_id, level := rule_level),
-                struct_pack(log := full_log, location := coalesce(finding_location, ''),
-                decoder := coalesce(finding_decoder, ''), rule := coalesce(rule_id, ''),
-                level := coalesce(rule_level, -1))).level AS observed_rule_level,
+            -- The key parts are encoded as a JSON array rather than joined with
+            -- a delimiter. A log type and a message can both contain any
+            -- delimiter, so joining them is not injective: location "a|b" with
+            -- message "c" and location "a" with message "b|c" would share one
+            -- key and merge two findings into one.
+            md5(
+                to_json(
+                    CASE
+                        WHEN observed_status = 'below_threshold' THEN [observed_status, rule_key]
+                        ELSE [observed_status, finding_log_type, message_pattern]
+                    END
+                )
+            ) AS finding_key,
+            observed_status,
+            finding_log_type AS log_type,
+            message_pattern,
+            event_count,
+            affected_agents,
+            strftime(first_timestamp, '%Y-%m-%d %H:%M:%S%z') AS first_seen,
+            strftime(last_timestamp, '%Y-%m-%d %H:%M:%S%z') AS last_seen,
+            sample.decoder AS observed_decoder,
+            sample.location AS observed_location,
+            sample.rule_id AS observed_rule_id,
+            sample.rule_level AS observed_rule_level,
             -- The representative is still the deterministic min() of the raw
             -- logs; only its line breaks are collapsed. A sample exists to be
             -- replayed through wazuh-logtest, which reads one log per line, so
             -- a multi-line log emitted verbatim would be replayed as several
             -- unrelated logs -- the first tested against the wrong decoder and
             -- the rest as fragments no rule was ever written for.
-            trim(regexp_replace(min(full_log), '[\r\n]+', ' ', 'g')) AS sample_log
-        FROM finding_events
-        GROUP BY finding_key
+            trim(regexp_replace(sample.full_log, '[\r\n]+', ' ', 'g')) AS sample_log
+        FROM (
+            SELECT
+                g.*,
+                CASE
+                    WHEN g.observed_status = 'below_threshold' THEN concat('rule:', g.rule_key)
+                    ELSE coalesce(t.log_template, normalize_log(g.sample.full_log))
+                END AS message_pattern
+            FROM finding_groups g
+            LEFT JOIN templates t ON t.template_id = g.template_id
+        )
         """
     )

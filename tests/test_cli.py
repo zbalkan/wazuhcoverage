@@ -1,5 +1,6 @@
 import gzip
 import io
+import signal
 import sys
 from dataclasses import replace
 from pathlib import Path
@@ -445,6 +446,85 @@ def test_the_documented_short_flags_still_cluster() -> None:
     assert arguments.targets == []
 
 
+def test_sigterm_exits_cleanly_only_while_a_run_is_active(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys
+) -> None:
+    # Python's default SIGTERM action skips every finally block, which would
+    # leave the spill directory and template files behind. A run swaps in a
+    # handler that exits through them, and puts the default back afterwards.
+    archive = tmp_path / "archive.json.gz"
+    archive.touch()
+    during: list = []
+
+    monkeypatch.setattr(cli, "resolve_targets", lambda _targets: [archive])
+    monkeypatch.setattr(
+        cli,
+        "analyze_archive",
+        lambda path, **_kwargs: during.append(signal.getsignal(signal.SIGTERM)) or _analysis(path),
+    )
+    monkeypatch.setattr(cli, "render_report", lambda _analysis, _verifications=(), **_kwargs: "report\n")
+
+    assert signal.getsignal(signal.SIGTERM) is signal.SIG_DFL
+    assert cli.main([str(archive)]) == 0
+    assert during == [cli._raise_system_exit]
+    assert signal.getsignal(signal.SIGTERM) is signal.SIG_DFL
+    capsys.readouterr()
+
+
+def test_a_host_sigterm_handler_is_left_alone(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys) -> None:
+    archive = tmp_path / "archive.json.gz"
+    archive.touch()
+    during: list = []
+
+    def host_handler(_signum, _frame) -> None:
+        return None
+
+    monkeypatch.setattr(cli, "resolve_targets", lambda _targets: [archive])
+    monkeypatch.setattr(
+        cli,
+        "analyze_archive",
+        lambda path, **_kwargs: during.append(signal.getsignal(signal.SIGTERM)) or _analysis(path),
+    )
+    monkeypatch.setattr(cli, "render_report", lambda _analysis, _verifications=(), **_kwargs: "report\n")
+
+    previous = signal.signal(signal.SIGTERM, host_handler)
+    try:
+        assert cli.main([str(archive)]) == 0
+        assert during == [host_handler]
+        assert signal.getsignal(signal.SIGTERM) is host_handler
+    finally:
+        signal.signal(signal.SIGTERM, previous)
+    capsys.readouterr()
+
+
+def test_a_sigterm_inside_a_query_stops_the_run(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys) -> None:
+    # DuckDB checks for signals while a query runs and reports the handler's
+    # SystemExit as an interrupted query, an ordinary exception. That must end
+    # the run with the signal's status, not count as one failed archive and
+    # move on to the next.
+    archives = [tmp_path / "a.json.gz", tmp_path / "b.json.gz"]
+    for archive in archives:
+        archive.touch()
+    analyzed: list[Path] = []
+
+    def interrupted(path, **_kwargs):
+        analyzed.append(path)
+        try:
+            cli._raise_system_exit(signal.SIGTERM, None)
+        except SystemExit:
+            raise RuntimeError("Query interrupted") from None
+
+    monkeypatch.setattr(cli, "resolve_targets", lambda _targets: archives)
+    monkeypatch.setattr(cli, "analyze_archive", interrupted)
+
+    with pytest.raises(SystemExit) as exit_info:
+        cli.main([str(path) for path in archives])
+
+    assert exit_info.value.code == 128 + signal.SIGTERM
+    assert analyzed == [archives[0]]
+    assert "failed" not in capsys.readouterr().err
+
+
 def test_log_format_keeps_its_documented_default() -> None:
     assert cli.build_parser().parse_args(["a.json"]).log_format == "syslog"
 
@@ -609,6 +689,7 @@ def test_online_run_reads_threshold_once_and_reports_source(
 
     monkeypatch.setattr(cli, "resolve_targets", lambda _targets: archives)
     monkeypatch.setattr(cli, "unavailable_reason", lambda: None)
+
     def read_threshold() -> int:
         reads.append(1)
         return 6

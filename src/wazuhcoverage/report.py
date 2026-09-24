@@ -5,13 +5,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Optional
 
-from wazuhcoverage.models import (
-    DROPPED_STATUSES,
-    EFFECTIVE_STATES,
-    PROCESSED_STATUS,
-    ArchiveAnalysis,
-    Verification,
-)
+from wazuhcoverage.models import DROPPED_STATUSES, EFFECTIVE_STATES, PROCESSED_STATUS, ArchiveAnalysis, Verification
 
 _PROCESSED_LABEL = "Processed"
 _DROPPED_LABEL = "Dropped"

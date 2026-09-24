@@ -75,8 +75,17 @@ One archive failing does not stop the remaining targets.
 | `0` | Every matched archive was processed. |
 | `1` | At least one archive failed, or a downstream pipe closed early. |
 | `2` | No target was supplied or matched. |
+| `143` | The run received SIGTERM. It stops at once and removes its temporary files first. |
 
 `--version` prints `wazuhcoverage <version>` to stdout and exits `0` without requiring a target. The version comes from the installed distribution. Combining `--version` with other flags prints a warning because those flags are not used.
+
+## Memory and temporary disk
+
+An archive is analysed in memory while it fits and on disk when it does not. DuckDB runs with its own defaults: a memory limit of 80% of physical memory and one thread per core. Once it reaches that limit it moves the event table and large sorts, joins and aggregations to a spill directory instead of failing, so disk is used only when the archive would otherwise not fit.
+
+Those defaults are sized for a machine the analysis has to itself. On a host shared with a Wazuh manager, run the analysis where it cannot compete with the manager for memory, or copy the archive elsewhere first.
+
+The spill directory is created under the system temporary directory, private to each archive, and removed when that archive is done. Set `TMPDIR` to choose where it goes. If the temporary directory is a `tmpfs`, as on some Linux distributions, spilling lands in memory after all; point `TMPDIR` at a disk-backed path instead.
 
 ## Malformed archive lines
 

@@ -52,7 +52,7 @@ The tool prefers this false-negative direction over a shared session that could 
 
 ## Location is preserved; log format is not
 
-Wazuh decoder selection can depend on event location. `wazuhcoverage` retains the observed location from the archive and supplies it during replay.
+Wazuh decoder selection can depend on event location. `wazuhcoverage` retains the observed location of the sample's own event and supplies it during replay.
 
 The original `log_format` is not present in the archive, so it cannot be recovered reliably. Replay defaults to `syslog`; use `--log-format` when the source requires another format. A wrong format can send the sample through the wrong decoder chain and make the replay result misleading.
 

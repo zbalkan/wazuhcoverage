@@ -83,7 +83,7 @@ The index makes the measured unique-heavy case close to linear rather than pairw
 
 drain3 is order dependent and assigns `cluster_id` in arrival order, so neither could be used as a finding key. Distinct messages are fed to the miner in sorted order, and template IDs are derived from the sorted template text instead.
 
-The template a message receives when it is inserted can still widen as later messages join the same cluster, so the most recently returned template is kept for every cluster and all of its assignments use that final value. This also preserves the last template of a cluster the LRU cap evicted; reading only `miner.drain.clusters` after the pass would lose it and turn the safety cap into a `KeyError` on the first eviction. Two clusters can carry the same template text once eviction recreates one, so templates are keyed by text and such clusters land in a single finding.
+The template a message receives when it is inserted can still widen as later messages join the same cluster, so every template change is recorded in order and each cluster keeps the last one; all of its assignments use that final value. This also preserves the last template of a cluster the LRU cap evicted; reading only `miner.drain.clusters` after the pass would lose it and turn the safety cap into a missing template on the first eviction. Two clusters can carry the same template text once eviction recreates one, so templates are keyed by text and such clusters land in a single finding.
 
 ### The trade-off
 
@@ -103,13 +103,23 @@ The distinction between skipping and ignoring is the whole point: ignoring would
 
 The regex pass ahead of mining is deliberately conservative: common timestamp prefixes, UUIDs, hexadecimal tokens of sixteen characters or more, and decimal numbers of five digits or more. Short numbers, IP addresses, ports, usernames, paths, event IDs, and status codes are retained, because masking them can materially change detection semantics and a pattern that hides an event ID is not worth reading.
 
-Normalized mining rows are materialized once and contain only `no_decoder` and `no_alerting_rule` events. `below_threshold` findings bypass both normalization and the template joins because they group directly by rule ID; alerting events need neither operation. This prevents the regex expressions from being recomputed and avoids doing mining-related work for rows that cannot use its result.
+### Keeping message text out of memory
+
+A Windows event's message runs to 32,766 characters, and Wazuh caps a log at `OS_MAXSTR`, 64 KiB, so an archive of Windows events carries `full_log` values up to 64 KiB, each repeated in decoded fields. DuckDB can spill a table of such text, but not a `DISTINCT`, an `ORDER BY` or a hash join whose rows carry it. Each of those needed memory in proportion to the archive's distinct text, whatever the memory limit: 389 MB of distinct messages failed under a 512 MiB limit and 779 MB under 768 MiB, so an archive's distinct text, not the limit, decided whether a run fit.
+
+Messages are therefore identified by the MD5 of their normalized text, held as two 64-bit halves, and the text never enters a hash table or a sort inside DuckDB. Each mined event is hashed once; the first event of each digest is found by grouping on the digest; findings group on template IDs, and the template and sample text is attached once per finding at the end. Two different messages sharing a digest would merge their findings, which at 2^-128 per pair is not a practical risk. The digest travels as two halves because handing DuckDB's 128-bit integer to Python, or casting it to text, cost about 100 microseconds a row.
+
+Drain must still see the distinct messages in sorted order. They are read out of DuckDB in chunks of consecutive events holding at most 64 MiB of raw log, each chunk its own query over an event range, which DuckDB answers from the row groups that range covers. An archive whose distinct text fits one chunk is sorted in memory and mined directly. Otherwise each chunk is sorted in Python and written to disk as a run of length-prefixed records, and `heapq.merge` reads the runs back as one sorted sequence, holding a record per run. The records are packed with `struct` rather than JSON, which cost several microseconds a record each way, or pickle, which would execute whatever a tampered run file told it to. Python orders strings by code point, which is the order DuckDB's binary collation gives UTF-8, so the feed is exactly the one an `ORDER BY` produced and the findings are unchanged. A single query streaming every distinct message was not an option: DuckDB either materialized the whole result, which is the archive's distinct text again, or spent a tenth of a second on each batch it handed over.
+
+Drain's decisions are written to disk as they are made: one `(log_hi, log_lo, cluster_id)` row per message, and one row per template change. DuckDB keeps the last template of each cluster, by digest again, and joins the assignments to it. Python holds one run and the miner's own state, never the whole vocabulary.
+
+This bounds memory, not time, and it costs some. On an archive of 1.6 million distinct syslog lines, with mining stubbed out, reading, sorting and merging the messages took about 17 seconds where one sorted query had taken 8. Mining those lines for real takes more than twenty-five minutes, so the difference is under one per cent of a real run, and on an archive whose messages repeat the new path is faster. Mining cost is set by how many clusters each message is compared with, and that is unchanged.
 
 ### Bulk loading the template map
 
-DuckDB's Python parameter binding costs roughly 140 microseconds per row for bulk data — about 25 seconds for one high-entropy archive — while its CSV reader loads the same rows in 0.2 seconds. Chunking the binding does not help, so the log-ID to template-ID mapping is handed over through a temporary CSV file that is removed before the load returns.
+DuckDB's Python parameter binding costs roughly 140 microseconds per row for bulk data — 27 seconds for 50,000 templates — while its file readers load the same rows in a fraction of a second. Chunking the binding does not help, so both mining outputs are handed over as temporary files that are removed before the load returns.
 
-Only integers are written to that file. No log text passes through CSV quoting, so an embedded delimiter, quote, or newline in a message cannot corrupt the join key.
+The assignments file is CSV and carries only integers, so no log text passes through CSV quoting and an embedded delimiter, quote, or newline cannot corrupt the join key. Template text goes through newline-delimited JSON instead, whose escaping round-trips every delimiter, quote, newline, and control character a log can contain.
 
 The template-text table likewise avoids per-row parameter binding, but uses a temporary NDJSON file because it must preserve arbitrary log text. JSON escaping makes quotes, pipes, line breaks and Unicode unambiguous. The file is removed before the load returns.
 
@@ -117,11 +127,27 @@ The template-text table likewise avoids per-row parameter binding, but uses a te
 
 A finding's representative is the deterministic `min()` of its raw logs, with only its line breaks collapsed. Its location, decoder and rule metadata all come from that same source event; ties between identical raw logs are resolved by those metadata fields. The sample exists to be replayed through `wazuh-logtest`, which reads one log per line, so a multi-line log emitted verbatim would be replayed as several unrelated logs — the first tested against the wrong decoder and the rest as fragments no rule was ever written for.
 
+The fields a replay depends on — `observed_location`, `observed_decoder`, `observed_rule_id`, and `observed_rule_level` — are taken from the sample's own event. Aggregating each one separately would pick it from whichever row a parallel scan reached first, so the location could change between runs and pair the sample with another event's source; the decoder chain consults the location, so such a replay could resolve differently from the event that was archived. The sample is the minimum of a struct whose first field is the raw log and whose remaining fields break ties, so the choice is total and deterministic.
+
 `Finding.sample_log` carries the collapsed value, so an API consumer that replays samples gets the same guarantee the CLI does. `message_pattern` is not collapsed, because it is a grouping key and is reported verbatim; the report collapses it only while rendering.
+
+## Finding keys
+
+`finding_key` is the MD5 of the key parts encoded as a JSON array: the status and rule ID for `below_threshold`, and the status, log type, and message pattern otherwise. The parts are not joined with a delimiter because a log type and a message can both contain any delimiter, so a join is not injective. A command-output location such as `a|b` with the message `c`, and a location `a` with the message `b|c`, would share one key and be reported as a single finding. Keys are stable across runs of the same version, not across versions.
+
+## Memory and spilling
+
+The archive is analysed in an in-memory DuckDB database that spills to disk, with DuckDB's own memory limit and thread count: 80% of physical memory and one thread per core. Once it reaches the limit it evicts blocks of the event table and of large sorts, joins and aggregations to a temp directory instead of failing. There is no option to change either. A memory-limit option was tried and dropped: making a low limit hold took capping threads by measured per-thread allowances, and those allowances depended on the DuckDB version and the length of the logs.
+
+DuckDB's default spill location is `.tmp` under the current working directory. That would make where a run writes depend on where it was launched, fail outright in a read-only directory, and leave a stray directory in whatever folder cron started in. Each connection therefore gets a private directory under the system temporary directory, removed with its contents once the connection closes.
+
+Spilling covers tables, sorts, joins and aggregations, not everything. Two kinds of working memory sit outside it, and both scale with the thread count rather than with the archive. Reading the archive holds a JSON read buffer per thread: on archives of Windows events, DuckDB 1.5 needed 382 MiB for one thread and 844 MiB for four, whatever the line length. After the scan, each thread evaluates the normalization over vectors of 2,048 logs and keeps a copy at each stage of it: about 378 MB for one thread over logs of 49 KiB, negligible for syslog lines. On a machine with many cores and an archive of long Windows events, that working memory comes on top of the limit.
+
+Every join is written with its small side on the right, and DuckDB's join reordering is disabled so that side stays the build side. It estimated the events surviving the finding filter at a few percent of the true count and turned the template join around, building its hash table from events that carry the 64 KiB logs.
 
 ## No persistent state
 
-A run writes nothing but stdout and stderr. There is no processed-path cache, no lock file, and no flag to bypass one.
+A run writes nothing but stdout and stderr, apart from temporary files it removes before it finishes: a spooled stdin, the mining handover files, and the spill directory. The CLI turns SIGTERM into an ordinary exit so those are removed even when a run is stopped by a timeout or a service manager; only SIGKILL or a crash can leave them behind. There is no processed-path cache, no lock file, and no flag to bypass one.
 
 DuckDB is in-memory, but it can spill intermediate data under memory pressure. Its spill directory is set explicitly to an owned system-temporary directory rather than the default relative `.tmp`; the connection is closed before that directory is removed, including on analysis errors. The CSV and NDJSON bulk-load files use the system temporary directory and are likewise removed in `finally` blocks.
 

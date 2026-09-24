@@ -35,7 +35,7 @@ class IndexedDrain(Drain):
     """
 
     def __init__(self, *args: object, **kwargs: object) -> None:
-        super().__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)  # type: ignore
         self._postings: defaultdict[tuple[int, str], set[int]] = defaultdict(set)
         self._indexed_tokens: dict[int, tuple[str, ...]] = {}
         self._cluster_leaf: dict[int, Node] = {}
