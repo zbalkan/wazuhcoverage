@@ -18,7 +18,7 @@ from wazuhcoverage.presentation import (
     present_finding,
 )
 
-_HTML_TEMPLATE = """<!DOCTYPE html>
+_HTML_TEMPLATE = r"""<!DOCTYPE html>
 <html lang="en" data-theme="light">
 <head>
     <meta charset="UTF-8">
