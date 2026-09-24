@@ -3,9 +3,16 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Optional
+from typing import Literal, Optional
 
-from wazuhcoverage.models import DROPPED_STATUSES, EFFECTIVE_STATES, PROCESSED_STATUS, ArchiveAnalysis, Verification
+from wazuhcoverage.models import (
+    DROPPED_STATUSES,
+    EFFECTIVE_STATES,
+    PROCESSED_STATUS,
+    ArchiveAnalysis,
+    Finding,
+    Verification,
+)
 
 _PROCESSED_LABEL = "Processed"
 _DROPPED_LABEL = "Dropped"
@@ -21,15 +28,15 @@ _DROPPED_PERCENT_WIDTH = 12
 # One column per outcome, then the breakdown of the dropped one. The two
 # aggregates come first so a row can be read for coverage alone; the three
 # that follow say why the dropped share was dropped and sum back to it.
-_LOG_TYPE_COLUMNS = (_PROCESSED_LABEL, _DROPPED_LABEL) + DROPPED_STATUSES
+_LOG_TYPE_COLUMNS: tuple[Literal['Processed'], Literal['Dropped'], str, ...] = (_PROCESSED_LABEL, _DROPPED_LABEL) + DROPPED_STATUSES # type: ignore
 _LOG_TYPE_COLUMN_WIDTHS = {column: max(12, len(column) + 2) for column in _LOG_TYPE_COLUMNS}
 # The one bucket whose meaning the archive underdetermines; see
 # wazuhcoverage.models.STATUSES for why.
 _AMBIGUOUS_STATUS = "no_alerting_rule"
 _EFFECTIVE_WIDTH = max(24, max(len(state) for state in EFFECTIVE_STATES) + 2)
 _RESOLVED_OUTCOMES = ("Processed", "Suppressed", "Dropped", "Unresolved")
-_RESOLVED_LOG_WIDTHS = {column: max(12, len(column) + 2) for column in _RESOLVED_OUTCOMES}
-_STATUS_OUTCOME = {
+_RESOLVED_LOG_WIDTHS: dict[str, int] = {column: max(12, len(column) + 2) for column in _RESOLVED_OUTCOMES}
+_STATUS_OUTCOME: dict[str, str] = {
     "at_or_above_threshold": "Processed",
     "suppressed": "Suppressed",
     "below_threshold": "Suppressed",
@@ -38,8 +45,8 @@ _STATUS_OUTCOME = {
     "no_alerting_rule": "Unresolved",
     "unverified": "Unresolved",
 }
-_FINDING_GROUPS = ("Dropped", "Processed", "Unresolved")
-_FINDING_GROUP = {
+_FINDING_GROUPS: tuple[str, str, str] = ("Dropped", "Processed", "Unresolved")
+_FINDING_GROUP: dict[str, str] = {
     "no_decoder": "Dropped",
     "uncovered": "Dropped",
     "at_or_above_threshold": "Processed",
@@ -251,9 +258,9 @@ def _resolved_counts(
 def _resolved_outcome_table(statuses: dict[str, int], total: int) -> list[str]:
     """Keep whole-archive totals while separating matched suppression from loss."""
 
-    outcomes = dict.fromkeys(_RESOLVED_OUTCOMES, 0)
+    outcomes: dict[Literal['Processed', 'Suppressed', 'Dropped', 'Unresolved'], int] = dict.fromkeys(_RESOLVED_OUTCOMES, 0)
     for status, count in statuses.items():
-        outcomes[_STATUS_OUTCOME[status]] += count
+        outcomes[_STATUS_OUTCOME[status]] += count  # type: ignore
     rows = [
         "",
         "Outcome (with replay)",
@@ -291,9 +298,9 @@ def _resolved_log_type_table(log_types: dict[Optional[str], dict[str, int]], tot
         _resolved_log_type_row("Log type", "Events", "% total", {name: name for name in _RESOLVED_OUTCOMES}),
     ]
     for log_type, statuses in sorted(log_types.items(), key=lambda item: (-sum(item[1].values()), item[0] or "")):
-        counts = dict.fromkeys(_RESOLVED_OUTCOMES, 0)
+        counts: dict[Literal['Processed', 'Suppressed', 'Dropped', 'Unresolved'], int] = dict.fromkeys(_RESOLVED_OUTCOMES, 0)
         for status, count in statuses.items():
-            counts[_STATUS_OUTCOME[status]] += count
+            counts[_STATUS_OUTCOME[status]] += count  # type: ignore
         event_count = sum(counts.values())
         if not event_count:
             continue
