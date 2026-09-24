@@ -30,9 +30,11 @@ Library callers analysing data away from the manager should pass the appropriate
 
 ## Replay can refine the result
 
-`wazuh-logtest` reports the rule selected during testing, including level-0 rules. When the optional replay integration is available, `wazuhcoverage` sends one representative sample per relevant finding and records an effective state beside the archive observation.
+`wazuh-logtest` reports the rule selected during testing, including level-0 rules. When the optional replay integration is available, `wazuhcoverage` sends one representative sample per relevant finding and records an effective state for that sample.
 
-The archive fields are not overwritten. They describe what the stored record contains; the effective state describes what the replaying manager does with the sample now.
+The Python API retains the archive fields as observations of the stored record. The CLI displays a usable replay verdict as the finding's status, rule, and level; it does not display the ambiguous archive status alongside that verdict. When the report contains replay results, its summary shows effective coverage for replayed findings instead of the archive-status tables. Findings without a replay still use their archive observations, and a failed replay is shown as `unverified`.
+
+One replay identifies the rule matched by the representative sample. It does not prove that every event grouped into that finding matched the same rule.
 
 A replay that fails or returns no usable answer is `unverified`, never `uncovered`. Infrastructure failure must not be converted into a coverage gap.
 

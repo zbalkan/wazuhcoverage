@@ -38,19 +38,15 @@ def render_report(
 ) -> str:
     """Render a compact human-readable report for one archive.
 
-    The first table splits the archive into the two outcomes that matter --
-    processed and dropped -- and breaks the dropped share into the three
-    buckets that explain it, ranked by event count. The second pivots the
-    status/log-type cells into one row per log type and ranks those rows by
-    aggregate event count.
-
-    ``verifications`` are optional wazuh-logtest replays. When present they add
-    an effective-coverage table and an ``Effective`` line to each finding they
-    cover, and they suppress the note about what an absent rule cannot prove,
-    because a replay has since answered that question.
+    Without replays, the archive outcome and log-type tables show the observed
+    status. When replays are available, the effective-coverage table reports
+    their results instead; archive statuses cannot determine whether a rule
+    matched a suppressed event. Replayed findings use the effective verdict,
+    while findings without a replay retain their observed status.
     """
 
     lines: list[str] = [f"Archive: {analysis.path}"]
+    by_key = {item.finding_key: item for item in verifications}
     if alert_threshold is not None:
         source = f" ({threshold_source})" if threshold_source else ""
         lines.append(f"Alert threshold: {alert_threshold}{source}")
@@ -59,40 +55,34 @@ def render_report(
         [
             f"Total events: {analysis.total_events:,}",
             f"Malformed lines skipped: {analysis.malformed_lines:,}",
-            "",
-            "Outcome",
-            "-------",
-            _outcome_row("Outcome", "Events", "% total", "% dropped"),
         ]
     )
-
-    lines.extend(_outcome_table(analysis))
-
-    lines.extend(
-        [
-            "",
-            "Log types",
-            "---------",
-            _log_type_row(
-                "Log type",
-                "Events",
-                "% total",
-                {column: column for column in _LOG_TYPE_COLUMNS},
-            ),
-        ]
-    )
-
-    for log_type, event_count, status_counts in _summarize_log_types(analysis):
-        lines.append(
-            _log_type_row(
-                log_type or "-",
-                f"{event_count:,}",
-                _percent(_percentage(event_count, analysis.total_events)),
-                _log_type_cells(status_counts),
-            )
+    if not by_key:
+        lines.extend(["", "Outcome", "-------", _outcome_row("Outcome", "Events", "% total", "% dropped")])
+        lines.extend(_outcome_table(analysis))
+        lines.extend(
+            [
+                "",
+                "Log types",
+                "---------",
+                _log_type_row(
+                    "Log type",
+                    "Events",
+                    "% total",
+                    {column: column for column in _LOG_TYPE_COLUMNS},
+                ),
+            ]
         )
+        for log_type, event_count, status_counts in _summarize_log_types(analysis):
+            lines.append(
+                _log_type_row(
+                    log_type or "-",
+                    f"{event_count:,}",
+                    _percent(_percentage(event_count, analysis.total_events)),
+                    _log_type_cells(status_counts),
+                )
+            )
 
-    by_key = {item.finding_key: item for item in verifications}
     lines.extend(_effective_table(analysis, by_key))
 
     lines.extend(["", f"Findings: {len(analysis.findings):,}", ""])
@@ -101,16 +91,25 @@ def render_report(
 
     for index, finding in enumerate(analysis.findings, start=1):
         verification = by_key.get(finding.finding_key)
+        status = verification.effective_state if verification is not None else finding.observed_status
+        rule_id = verification.rule_id if verification is not None else finding.observed_rule_id
+        rule_level = verification.rule_level if verification is not None else finding.observed_rule_level
         lines.extend(
             [
-                f"[{index}] {finding.observed_status} | {finding.log_type or '-'}",
+                f"[{index}] {status} | {finding.log_type or '-'}",
                 f"    Events: {finding.event_count:,}",
                 f"    Affected agents: {finding.affected_agents:,}",
                 f"    First seen: {finding.first_seen or '-'}",
                 f"    Last seen: {finding.last_seen or '-'}",
                 f"    Decoder: {finding.observed_decoder or '-'}",
-                f"    Rule: {finding.observed_rule_id or '-'}",
-                f"    Level: {finding.observed_rule_level if finding.observed_rule_level is not None else '-'}",
+            ]
+        )
+        if rule_id is not None:
+            lines.append(f"    Rule: {rule_id}")
+        if rule_level is not None:
+            lines.append(f"    Level: {rule_level}")
+        lines.extend(
+            [
                 f"    Pattern: {_single_row(finding.message_pattern)}",
                 f"    Sample: {finding.sample_log}",
             ]
@@ -227,14 +226,12 @@ def _effective_table(analysis: ArchiveAnalysis, by_key: dict[str, Verification])
 
 
 def _finding_verdict(verification: Optional[Verification]) -> list[str]:
-    """Render one finding's replay result, or nothing when it was not replayed."""
+    """Render additional replay details without repeating the finding's verdict."""
 
     if verification is None:
         return []
 
-    rule = verification.rule_id or "-"
-    level = verification.rule_level if verification.rule_level is not None else "-"
-    rows = [f"    Effective: {verification.effective_state} (rule {rule}, level {level})"]
+    rows: list[str] = []
 
     if verification.rule_description:
         rows.append(f"    Matched: {_single_row(verification.rule_description)}")

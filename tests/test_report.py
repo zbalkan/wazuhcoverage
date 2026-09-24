@@ -362,9 +362,20 @@ def _verifications() -> tuple[Verification, ...]:
 def test_a_verified_report_names_the_rule_the_archive_omitted() -> None:
     text = render_report(_verified_analysis(), _verifications())
 
-    assert "Effective: suppressed (rule 61100, level 0)" in text
+    suppressed, uncovered = text.split("[1] suppressed | windows_eventchannel", 1)[1].split(
+        "[2] uncovered | sshd", 1
+    )
+    assert "    Rule: 61100\n    Level: 0\n" in suppressed
+    assert "no_alerting_rule" not in suppressed
+    assert "    Rule: -\n" not in suppressed
+    assert "    Level: -\n" not in suppressed
     assert "Matched: Windows System informational event" in text
-    assert "Effective: uncovered (rule -, level -)" in text
+    assert "    Rule:" not in uncovered
+    assert "    Level:" not in uncovered
+    assert "    Effective:" not in text
+    assert "  no_alerting_rule" not in text
+    assert "\nOutcome\n" not in text
+    assert "\nLog types\n" not in text
 
 
 def test_the_effective_table_weights_states_by_events() -> None:
@@ -402,11 +413,9 @@ def test_an_unverified_finding_says_why() -> None:
 
     text = render_report(_verified_analysis(), verifications)
 
-    assert "Effective: unverified" in text
+    assert "[2] unverified | sshd" in text
     assert "Replay: the logtest daemon reported an error for this sample" in text
-    # The finding that was not replayed carries no verdict at all rather than
-    # a blank one.
-    assert text.count("Effective:") == 1
+    assert "[1] no_alerting_rule | windows_eventchannel" in text
 
 
 def test_an_unverified_report_is_unchanged() -> None:

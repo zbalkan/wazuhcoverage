@@ -106,7 +106,7 @@ Every parsed event is assigned to exactly one observed bucket:
 
 The CLI reads `<alerts><log_alert_level>` from `/var/ossec/etc/ossec.conf` when that local configuration is readable. If it is absent or cannot be read, the CLI assumes Wazuh's documented default of `3`. The resolved value and its provenance are printed near the top of every statistics report, for example `Alert threshold: 6 (from /var/ossec/etc/ossec.conf)` or `Alert threshold: 3 (Wazuh default assumed; could not read /var/ossec/etc/ossec.conf)`. The same resolved value is used for both archive classification and manager replay. Library callers choose the threshold explicitly; see [API.md](API.md).
 
-The report starts with an outcome table, then breaks those outcomes down by log type, followed by grouped findings. `% total` uses all parsed events as its denominator. `% dropped` uses only dropped events, which makes it useful for prioritising the remaining coverage work.
+Without replay results, the report starts with an archive outcome table, then breaks those observed outcomes down by log type, followed by grouped findings. `% total` uses all parsed events as its denominator. `% dropped` uses only dropped events.
 
 A finding represents a group of similar uncovered events. It includes event count, affected agents, time range, observed decoder/rule information, a mined message pattern, and one real sample from the archive. The sample is suitable for replay: embedded CR/LF runs are collapsed to one space so one source event remains one input line.
 
@@ -116,7 +116,7 @@ A finding represents a group of similar uncovered events. It includes event coun
 
 An archive alone cannot always distinguish an event that was genuinely unmatched from one that was deliberately quiet. When the optional `logtest` extra is installed and a usable Wazuh manager socket is available, the CLI automatically replays one representative sample per relevant finding through `wazuh-logtest`.
 
-The replay adds an effective state:
+The replay provides an effective state for the representative sample:
 
 | Effective state | Meaning |
 | --- | --- |
@@ -128,6 +128,8 @@ The replay adds an effective state:
 | `unverified` | Replay did not produce a usable answer. |
 
 A replay failure is `unverified`, never `uncovered`.
+
+For a replayed finding, the CLI displays this effective state as its status and uses the replayed rule ID and level. It does not repeat the archive's `no_alerting_rule` status or blank rule fields beside a confirmed match. With replay results present, the report shows an effective-coverage table for replayed findings instead of the archive outcome and log-type tables. The effective table's event counts are the sizes of the represented findings; only one sample from each finding was replayed. Findings without replay results retain their archive status.
 
 Replay describes the manager used for the replay, which may not have the same ruleset as the manager that originally wrote the archive. A single-sample replay also cannot reproduce rules that require event history, and the archive does not preserve the original `log_format`. These limitations are explained in [CAVEATS.md](CAVEATS.md).
 
