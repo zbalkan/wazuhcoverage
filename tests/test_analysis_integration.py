@@ -5,8 +5,8 @@ from pathlib import Path
 import duckdb
 import pytest
 
-from wazuhcoverage import analyze_archive
 from wazuhcoverage import analysis as analysis_module
+from wazuhcoverage import analyze_archive
 
 
 def _write_jsonl(path: Path, rows: list[dict]) -> None:
@@ -61,6 +61,19 @@ def _fixture_rows() -> list[dict]:
             "rule": {"id": "101", "level": 5, "description": "alert"},
         },
     ]
+
+
+def test_count_rows_rejects_missing_scalar_result() -> None:
+    class Cursor:
+        def fetchone(self):
+            return None
+
+    class Connection:
+        def execute(self, _query: str):
+            return Cursor()
+
+    with pytest.raises(RuntimeError, match="count query returned no scalar value"):
+        analysis_module._count_rows(Connection(), "SELECT count(*)")  # type: ignore
 
 
 def test_analysis_classifies_and_groups_findings(tmp_path: Path) -> None:
@@ -135,6 +148,82 @@ def test_below_threshold_rule_does_not_claim_one_log_type(tmp_path: Path) -> Non
     assert finding.log_type is None
     assert finding.observed_decoder is None
     assert finding.event_count == 2
+
+
+def test_replay_fields_come_from_the_sample_event(tmp_path: Path) -> None:
+    archive = tmp_path / "archives.json"
+    # One finding, two sources. The first row in the file is not the sample:
+    # the sample is the smaller raw log, which comes second. Taking the
+    # location from whichever row the scan reached first would pair the sample
+    # with the other event's source, and a replay under that location can
+    # resolve to a different decoder than the one that actually ran.
+    _write_jsonl(
+        archive,
+        [
+            {
+                "location": "/var/log/second.log",
+                "decoder": {"name": "app"},
+                "full_log": "app worker stopped on /var/log/second.log",
+            },
+            {
+                "location": "/var/log/first.log",
+                "decoder": {"name": "app"},
+                "full_log": "app worker stopped on /var/log/first.log",
+            },
+        ],
+    )
+
+    result = analyze_archive(archive)
+
+    assert len(result.findings) == 1
+    finding = result.findings[0]
+    assert finding.event_count == 2
+    assert finding.sample_log == "app worker stopped on /var/log/first.log"
+    assert finding.observed_location == "/var/log/first.log"
+    assert finding.observed_decoder == "app"
+
+
+def test_below_threshold_rule_level_comes_from_the_sample_event(tmp_path: Path) -> None:
+    archive = tmp_path / "archives.json"
+    # A rule whose level was changed while the archive was being written spans
+    # two levels under one rule ID. The reported level belongs to the sample.
+    _write_jsonl(
+        archive,
+        [
+            {"full_log": "second", "decoder": {"name": "a"}, "rule": {"id": "200", "level": 2}},
+            {"full_log": "first", "decoder": {"name": "a"}, "rule": {"id": "200", "level": 1}},
+        ],
+    )
+
+    result = analyze_archive(archive)
+
+    assert len(result.findings) == 1
+    assert result.findings[0].sample_log == "first"
+    assert result.findings[0].observed_rule_level == 1
+
+
+def test_a_delimiter_in_a_log_type_cannot_merge_two_findings(tmp_path: Path) -> None:
+    archive = tmp_path / "archives.json"
+    # With no decoder and no program name, the location is the log type, and a
+    # command-output location can contain a pipe. Joining the key parts with a
+    # delimiter would give these two rows one key -- "a|b" + "c" and "a" + "b|c"
+    # -- and report them as a single finding with another row's sample.
+    _write_jsonl(
+        archive,
+        [
+            {"location": "a|b", "full_log": "c", "agent": {"id": "001"}},
+            {"location": "a", "full_log": "b|c", "agent": {"id": "002"}},
+        ],
+    )
+
+    result = analyze_archive(archive)
+
+    assert len(result.findings) == 2
+    assert len({finding.finding_key for finding in result.findings}) == 2
+    by_log_type = {finding.log_type: finding for finding in result.findings}
+    assert by_log_type["a|b"].sample_log == "c"
+    assert by_log_type["a"].sample_log == "b|c"
+    assert all(finding.event_count == 1 for finding in result.findings)
 
 
 def test_compressed_and_uncompressed_archives_match(tmp_path: Path) -> None:

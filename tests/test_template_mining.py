@@ -4,7 +4,6 @@ from pathlib import Path
 import duckdb
 
 from wazuhcoverage import analyze_archive
-from wazuhcoverage.analysis import _load_templates
 
 
 def _write_jsonl(path: Path, rows: list[dict]) -> None:
@@ -147,14 +146,77 @@ def test_messages_containing_csv_metacharacters_still_group_correctly(tmp_path: 
     assert all(f.sample_log in expected_samples for f in result.findings)
 
 
-def test_template_bulk_load_preserves_ndjson_metacharacters() -> None:
-    connection = duckdb.connect(":memory:")
-    connection.execute("CREATE TABLE templates (template_id INTEGER, log_template VARCHAR)")
-    templates = [(1, 'quote=" pipe=| newline=\n snowman=☃'), (2, "carriage=\r return")]
+def test_template_text_survives_the_file_handover(tmp_path: Path) -> None:
+    archive = tmp_path / "archives.json"
+    # Template text is handed to DuckDB through a JSON file. Quotes,
+    # backslashes, delimiters and characters outside the BMP must come back
+    # byte for byte; Drain itself only rejoins tokens with single spaces.
+    text = 'app wrote "C:\\Temp\\x, y|z" for \u00e9l\u00e8ve \U0001F600 {"k": [1]}\ttab'
+    _write_jsonl(archive, [_undecoded(text)])
 
-    _load_templates(connection, templates)
+    result = analyze_archive(archive)
 
-    assert connection.execute("SELECT * FROM templates ORDER BY template_id").fetchall() == templates
+    assert len(result.findings) == 1
+    assert result.findings[0].message_pattern == " ".join(text.split())
+
+
+def test_mining_through_many_sorted_runs_changes_nothing(tmp_path: Path, monkeypatch) -> None:
+    archive = tmp_path / "archives.json"
+    # Distinct messages reach the miner through sorted runs on disk, merged
+    # back into one sorted sequence. With a run per message the merge does all
+    # the ordering, and a template that widens after its first members were
+    # written out must still reach all of them: the run size may only trade
+    # memory for round trips.
+    rows = _ssh_failures() + [
+        _undecoded("kernel: usb 1-1: new high-speed USB device number 4 using ehci-pci", "010"),
+        _undecoded("kernel: usb 1-2: new high-speed USB device number 5 using ehci-pci", "011"),
+    ]
+    _write_jsonl(archive, rows)
+
+    expected = analyze_archive(archive)
+    monkeypatch.setattr("wazuhcoverage.analysis._SORT_RUN_CHARACTERS", 1)
+    split = analyze_archive(archive)
+
+    assert split == expected
+    assert sorted(f.event_count for f in split.findings) == [2, 5]
+    assert all("<*>" in f.message_pattern for f in split.findings)
+
+
+def test_messages_at_the_windows_maximum_are_mined(tmp_path: Path, monkeypatch) -> None:
+    archive = tmp_path / "archives.json"
+    # A Windows event message runs to 32,766 characters. Messages that long
+    # must group like any other, whether their text reaches the miner in one
+    # sorted run or in several.
+    body = " ".join(f"word{index % 97}" for index in range(6_000))
+    messages = [f"PowerShell ScriptBlock {user} {body}"[:32_766] for user in ("alice", "bob", "carol")]
+    assert all(len(message) == 32_766 for message in messages)
+    _write_jsonl(archive, [_undecoded(message, f"00{index}") for index, message in enumerate(messages, start=1)])
+
+    whole = analyze_archive(archive)
+    monkeypatch.setattr("wazuhcoverage.analysis._SORT_RUN_CHARACTERS", 40_000)
+    split = analyze_archive(archive)
+
+    assert split == whole
+    assert len(whole.findings) == 1
+    finding = whole.findings[0]
+    assert finding.event_count == 3
+    assert finding.sample_log in messages
+    assert "<*>" in finding.message_pattern
+
+
+def test_python_sort_order_is_the_order_duckdb_gives_text() -> None:
+    # The distinct messages are sorted in Python and merged from disk instead
+    # of by ORDER BY, and Drain is order dependent: the two orders must agree
+    # for every character a log can hold, not only ASCII.
+
+    texts = ["b", "B", "a b", "a\tb", "é", "e", "z", "ǅ", "日本", "😀", "\U0010ffff", "a", "ab", "a\u00a0", "Ω", "ω"]
+    connection = duckdb.connect()
+    try:
+        ordered = [row[0] for row in connection.execute("SELECT unnest(?) AS t ORDER BY t", [texts]).fetchall()]
+    finally:
+        connection.close()
+
+    assert ordered == sorted(texts)
 
 
 def test_distinct_families_are_not_merged(tmp_path: Path) -> None:

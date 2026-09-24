@@ -1,7 +1,10 @@
+from __future__ import annotations
+
 import random
 from typing import Optional
 
 from drain3.drain import Drain
+from pytest import MonkeyPatch
 
 from wazuhcoverage._drain import IndexedDrain
 
@@ -33,6 +36,7 @@ def test_indexed_drain_matches_stock_drain_for_every_assignment() -> None:
             stock_cluster.get_template(),
             stock_change,
         )
+
 
 def test_indexed_drain_matches_stock_drain_through_eviction() -> None:
     messages = ["one", "two tokens", "three token message", "one", "four token message now"]
@@ -73,7 +77,7 @@ def test_indexed_drain_is_differentially_equivalent_on_generated_corpus() -> Non
         )
 
 
-def test_index_avoids_pairwise_distance_scans_on_unique_messages(monkeypatch) -> None:
+def test_index_avoids_pairwise_distance_scans_on_unique_messages(monkeypatch: MonkeyPatch) -> None:
     messages = ["<TIMESTAMP> " + " ".join(f"token{position}-{index}" for position in range(10)) for index in range(500)]
     stock = _drain(Drain)
     indexed = _drain(IndexedDrain)

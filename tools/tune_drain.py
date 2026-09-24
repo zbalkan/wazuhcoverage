@@ -98,7 +98,7 @@ FAMILIES: dict[str, Callable[[], str]] = {
     ),
 }
 
-# Kept in step with the normalized_events view in wazuhcoverage.analysis.
+# Kept in step with the normalize_log macro in wazuhcoverage.analysis.
 _SYSLOG_TS = re.compile(r"^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+[0-9]{1,2}\s+[0-9]{2}:[0-9]{2}:[0-9]{2}")
 _ISO_TS = re.compile(
     r"^[0-9]{4}-[0-9]{2}-[0-9]{2}[T ][0-9]{2}:[0-9]{2}:[0-9]{2}([.,][0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})?"

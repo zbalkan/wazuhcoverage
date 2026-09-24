@@ -92,10 +92,11 @@ class Finding:
     first_seen: Optional[str]
     last_seen: Optional[str]
     observed_decoder: Optional[str]
-    # The archive's location field for this group, which is what a faithful
-    # replay has to report to Wazuh: the decoder chain consults it, so a
-    # sample replayed under the wrong location can resolve to a different
-    # decoder than the one that actually ran.
+    # The location of the event sample_log was taken from, which is what a
+    # faithful replay has to report to Wazuh: the decoder chain consults it,
+    # so a sample replayed under the wrong location can resolve to a
+    # different decoder than the one that actually ran. The decoder and rule
+    # fields come from that same event.
     observed_location: Optional[str]
     observed_rule_id: Optional[str]
     observed_rule_level: Optional[int]

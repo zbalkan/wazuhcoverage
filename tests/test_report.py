@@ -61,14 +61,14 @@ def _rendered_log_type_rows(analysis: ArchiveAnalysis) -> list[str]:
     lines = render_report(analysis).splitlines()
     header = next(index for index, line in enumerate(lines) if line.startswith("Log type") and "Processed" in line)
     end = lines.index("", header + 1)
-    return lines[header + 1 : end]
+    return lines[header + 1: end]
 
 
 def _rendered_outcome_rows(analysis: ArchiveAnalysis) -> list[str]:
     lines = render_report(analysis).splitlines()
     header = next(index for index, line in enumerate(lines) if line.startswith("Outcome") and "% dropped" in line)
     end = lines.index("", header + 1)
-    return lines[header + 1 : end]
+    return lines[header + 1: end]
 
 
 def test_report_renders_outcome_and_log_type_tables() -> None:
@@ -372,7 +372,7 @@ def test_the_effective_table_weights_states_by_events() -> None:
     # same coverage statement, so the table counts events as well as findings.
     lines = render_report(_verified_analysis(), _verifications()).splitlines()
     header = lines.index("Effective coverage (wazuh-logtest)")
-    rows = [line.split() for line in lines[header + 3 : header + 5]]
+    rows = [line.split() for line in lines[header + 3: header + 5]]
 
     assert rows[0] == ["uncovered", "1", "10", "20.00%"]
     assert rows[1] == ["suppressed", "1", "40", "80.00%"]

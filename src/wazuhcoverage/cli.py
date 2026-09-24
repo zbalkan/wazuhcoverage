@@ -6,8 +6,10 @@ import argparse
 import io
 import os
 import shutil
+import signal
 import sys
 import tempfile
+import threading
 from collections.abc import Generator, Iterable
 from contextlib import contextmanager
 from dataclasses import replace
@@ -158,6 +160,11 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: Optional[list[str]] = None) -> int:
     args = build_parser().parse_args(argv)
+    with _sigterm_exits_cleanly():
+        return _run(args)
+
+
+def _run(args: argparse.Namespace) -> int:
     paths = [target for target in args.targets if target != STDIN_TARGET]
     read_stdin = STDIN_TARGET in args.targets or (not args.targets and not _stdin_is_a_terminal())
 
@@ -207,6 +214,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             _suppression_broken_stdout()
             return 1
         except Exception as exc:  # noqa: BLE001 - a bad stream must not hide the file targets
+            _stop_if_terminated()
             failed += 1
             print(f"wazuhcoverage: failed {STDIN_LABEL}: {exc}", file=sys.stderr)
         else:
@@ -225,6 +233,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             _suppression_broken_stdout()
             return 1
         except Exception as exc:  # noqa: BLE001 - one bad archive should not block the rest
+            _stop_if_terminated()
             failed += 1
             print(f"wazuhcoverage: failed {archive}: {exc}", file=sys.stderr)
 
@@ -234,6 +243,61 @@ def main(argv: Optional[list[str]] = None) -> int:
         file=sys.stderr,
     )
     return 1 if failed else 0
+
+
+# The exit status a received SIGTERM asks for, or None while none has arrived.
+_termination_status: Optional[int] = None
+
+
+@contextmanager
+def _sigterm_exits_cleanly() -> Generator[None, None, None]:
+    """Turn SIGTERM into an ordinary exit for the duration of a run.
+
+    A run keeps its spill directory, its template files and a spooled stdin
+    under the system temporary directory, and removes them in ``finally``
+    blocks. Python's default SIGTERM action ends the process without running
+    those, so a cron timeout or a service stop would leave behind files that
+    can be as large as the archive. Raising SystemExit instead unwinds the
+    stack through every cleanup, and the exit status stays the conventional
+    128 + 15.
+
+    Only the main thread can install a handler, and one a host application
+    already installed is left alone. The previous handler is restored when the
+    run ends, so calling ``main`` from Python changes nothing afterwards.
+    """
+
+    global _termination_status
+    _termination_status = None
+    if threading.current_thread() is not threading.main_thread() or (
+        signal.getsignal(signal.SIGTERM) is not signal.SIG_DFL
+    ):
+        yield
+        return
+
+    signal.signal(signal.SIGTERM, _raise_system_exit)
+    try:
+        yield
+    finally:
+        signal.signal(signal.SIGTERM, signal.SIG_DFL)
+
+
+def _raise_system_exit(signum: int, _frame: Any) -> None:
+    global _termination_status
+    _termination_status = 128 + signum
+    raise SystemExit(_termination_status)
+
+
+def _stop_if_terminated() -> None:
+    """Re-raise a SIGTERM that a running DuckDB query turned into an error.
+
+    DuckDB checks for signals while a query runs and, when the handler raises,
+    reports the query as interrupted with an exception of its own. The
+    per-archive error handling would otherwise count that as one failed
+    archive and carry on to the next.
+    """
+
+    if _termination_status is not None:
+        raise SystemExit(_termination_status)
 
 
 def _resolve_alert_threshold() -> tuple[int, str]:

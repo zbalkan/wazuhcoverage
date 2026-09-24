@@ -10,6 +10,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from pytest import MonkeyPatch
 
 from wazuhcoverage import ArchiveAnalysis, Finding, verify_findings
 from wazuhcoverage import verification as verification_module
@@ -78,12 +79,12 @@ class _FakeTester:
         return reply
 
 
-def _install(monkeypatch: pytest.MonkeyPatch, tester: _FakeTester) -> _FakeTester:
+def _install(monkeypatch: MonkeyPatch, tester: _FakeTester) -> _FakeTester:
     monkeypatch.setattr(verification_module, "_load_wazuhtester", lambda: tester)
     return tester
 
 
-def test_a_level_zero_match_is_suppressiond_not_uncovered(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_level_zero_match_is_suppressiond_not_uncovered(monkeypatch: MonkeyPatch) -> None:
     # The whole point of replaying. The archive recorded no rule for this
     # event; logtest reports the rule that matched and its level, so the two
     # outcomes the archive stores identically come apart here.
@@ -121,7 +122,7 @@ def test_a_level_zero_match_is_suppressiond_not_uncovered(monkeypatch: pytest.Mo
     ],
 )
 def test_every_reply_maps_to_one_effective_state(
-    monkeypatch: pytest.MonkeyPatch, status: str, level, expected: str
+    monkeypatch: MonkeyPatch, status: str, level, expected: str
 ) -> None:
     _install(monkeypatch, _FakeTester(_response(status, rule_id="1", rule_level=level)))
 
@@ -130,7 +131,7 @@ def test_every_reply_maps_to_one_effective_state(
     assert result.effective_state == expected
 
 
-def test_the_threshold_is_honoured(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_the_threshold_is_honoured(monkeypatch: MonkeyPatch) -> None:
     _install(monkeypatch, _FakeTester(_response("RuleMatch", rule_id="1", rule_level=5)))
 
     (result,) = verify_findings(_analysis(_finding("k")), alert_threshold=7)
@@ -138,7 +139,7 @@ def test_the_threshold_is_honoured(monkeypatch: pytest.MonkeyPatch) -> None:
     assert result.effective_state == "below_threshold"
 
 
-def test_a_daemon_error_is_unverified_never_uncovered(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_daemon_error_is_unverified_never_uncovered(monkeypatch: MonkeyPatch) -> None:
     # Reporting a failed replay as "uncovered" would invent a coverage gap out
     # of a broken socket, which is the one mistake this feature must not make.
     _install(monkeypatch, _FakeTester(_response("Error")))
@@ -149,7 +150,7 @@ def test_a_daemon_error_is_unverified_never_uncovered(monkeypatch: pytest.Monkey
     assert result.error
 
 
-def test_a_raised_exception_leaves_the_other_samples_running(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_raised_exception_leaves_the_other_samples_running(monkeypatch: MonkeyPatch) -> None:
     tester = _install(
         monkeypatch,
         _FakeTester(
@@ -163,12 +164,12 @@ def test_a_raised_exception_leaves_the_other_samples_running(monkeypatch: pytest
     first, second = verify_findings(_analysis(_finding("a"), _finding("b")))
 
     assert first.effective_state == "unverified"
-    assert "socket went away" in first.error
+    assert "socket went away" in first.error  # type: ignore
     assert second.effective_state == "at_or_above_threshold"
     assert len(tester.calls) == 2
 
 
-def test_a_matched_rule_without_a_usable_level_is_unverified(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_matched_rule_without_a_usable_level_is_unverified(monkeypatch: MonkeyPatch) -> None:
     # Placing it on either side of the threshold would be the same guess the
     # archive makes, which is what this feature exists to stop doing.
     _install(monkeypatch, _FakeTester(_response("RuleMatch", rule_id="1", rule_level="not-a-number")))
@@ -179,7 +180,7 @@ def test_a_matched_rule_without_a_usable_level_is_unverified(monkeypatch: pytest
     assert result.rule_id == "1"
 
 
-def test_the_findings_location_is_replayed_not_a_default(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_the_findings_location_is_replayed_not_a_default(monkeypatch: MonkeyPatch) -> None:
     # The decoder chain consults location. Replaying an EventChannel record as
     # "stdin" resolves it to the JSON decoder instead of windows_eventchannel,
     # which is a different answer to the question being asked.
@@ -193,7 +194,7 @@ def test_the_findings_location_is_replayed_not_a_default(monkeypatch: pytest.Mon
     ]
 
 
-def test_a_finding_without_a_location_falls_back(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_finding_without_a_location_falls_back(monkeypatch: MonkeyPatch) -> None:
     tester = _install(monkeypatch, _FakeTester(_response("NoRule")))
 
     verify_findings(_analysis(_finding("k", observed_location=None)))
@@ -201,7 +202,7 @@ def test_a_finding_without_a_location_falls_back(monkeypatch: pytest.MonkeyPatch
     assert tester.calls[0]["location"] == "stdin"
 
 
-def test_only_the_ambiguous_buckets_are_replayed(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_only_the_ambiguous_buckets_are_replayed(monkeypatch: MonkeyPatch) -> None:
     # A below_threshold finding already names the rule that fired, so a replay
     # would spend a round trip confirming the record.
     tester = _install(monkeypatch, _FakeTester(_response("NoRule")))
@@ -218,7 +219,7 @@ def test_only_the_ambiguous_buckets_are_replayed(monkeypatch: pytest.MonkeyPatch
     assert len(tester.calls) == 2
 
 
-def test_one_round_trip_per_finding_not_per_event(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_one_round_trip_per_finding_not_per_event(monkeypatch: MonkeyPatch) -> None:
     # Grouping is what makes this affordable: a finding standing for 40,000
     # events costs exactly one replay.
     tester = _install(monkeypatch, _FakeTester(_response("NoRule")))
@@ -228,14 +229,14 @@ def test_one_round_trip_per_finding_not_per_event(monkeypatch: pytest.MonkeyPatc
     assert len(tester.calls) == 1
 
 
-def test_an_unreachable_daemon_is_refused_not_reported_as_a_gap(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_an_unreachable_daemon_is_refused_not_reported_as_a_gap(monkeypatch: MonkeyPatch) -> None:
     _install(monkeypatch, _FakeTester(_response("NoRule"), available=False))
 
     with pytest.raises(RuntimeError, match="not answering"):
         verify_findings(_analysis(_finding("k")))
 
 
-def test_nothing_to_replay_needs_no_daemon(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_nothing_to_replay_needs_no_daemon(monkeypatch: MonkeyPatch) -> None:
     # The availability check comes after the target selection, so an archive
     # with full coverage does not fail on a machine with no manager.
     def explode() -> None:
@@ -251,7 +252,7 @@ def test_a_negative_threshold_is_rejected() -> None:
         verify_findings(_analysis(_finding("k")), alert_threshold=-1)
 
 
-def test_a_missing_library_names_the_extra(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_missing_library_names_the_extra(monkeypatch: MonkeyPatch) -> None:
     import builtins
 
     real_import = builtins.__import__
@@ -267,13 +268,13 @@ def test_a_missing_library_names_the_extra(monkeypatch: pytest.MonkeyPatch) -> N
         verify_findings(_analysis(_finding("k")))
 
 
-def test_the_probe_is_silent_when_a_replay_is_possible(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_the_probe_is_silent_when_a_replay_is_possible(monkeypatch: MonkeyPatch) -> None:
     _install(monkeypatch, _FakeTester(_response("NoRule")))
 
     assert verification_module.unavailable_reason() is None
 
 
-def test_the_probe_names_an_unanswering_socket(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_the_probe_names_an_unanswering_socket(monkeypatch: MonkeyPatch) -> None:
     _install(monkeypatch, _FakeTester(_response("NoRule"), available=False))
 
     reason = verification_module.unavailable_reason("/tmp/nope.sock")
@@ -282,7 +283,7 @@ def test_the_probe_names_an_unanswering_socket(monkeypatch: pytest.MonkeyPatch) 
     assert "/tmp/nope.sock" in reason
 
 
-def test_the_probe_reports_a_missing_library_instead_of_raising(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_the_probe_reports_a_missing_library_instead_of_raising(monkeypatch: MonkeyPatch) -> None:
     # A best-effort caller needs a sentence to print, not an exception to
     # catch: not having Wazuh on the machine is not an error in the archive.
     def refuse() -> None:
@@ -293,7 +294,7 @@ def test_the_probe_reports_a_missing_library_instead_of_raising(monkeypatch: pyt
     assert verification_module.unavailable_reason() == "wazuhtester is not installed, so findings cannot be replayed."
 
 
-def test_a_half_removed_install_is_a_reason_not_a_crash(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_half_removed_install_is_a_reason_not_a_crash(monkeypatch: MonkeyPatch) -> None:
     # pip uninstall can leave an empty wazuhtester directory behind, and Python
     # imports that as a namespace package with no attributes at all. So does
     # any stray directory of that name on the path. Importing is not the same
@@ -310,7 +311,7 @@ def test_a_half_removed_install_is_a_reason_not_a_crash(monkeypatch: pytest.Monk
     assert "not a usable install" in reason
 
 
-def test_a_probe_that_raises_still_returns_a_reason(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_probe_that_raises_still_returns_a_reason(monkeypatch: MonkeyPatch) -> None:
     class Exploding(_FakeTester):
         def is_logtest_available(self, socket_path=None) -> bool:
             raise PermissionError("cannot read the socket")
