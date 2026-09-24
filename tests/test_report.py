@@ -297,6 +297,25 @@ def test_the_caveat_is_omitted_when_the_bucket_is_empty() -> None:
 def _verified_analysis() -> ArchiveAnalysis:
     return replace(
         _analysis(),
+        total_events=53,
+        status_counts=(
+            StatusCount(status="at_or_above_threshold", event_count=3, percentage=300 / 53),
+            StatusCount(status="no_alerting_rule", event_count=50, percentage=5000 / 53),
+        ),
+        log_type_counts=(
+            LogTypeCount(
+                status="at_or_above_threshold", log_type="sshd",
+                event_count=3, percentage=300 / 53, status_percentage=100.0,
+            ),
+            LogTypeCount(
+                status="no_alerting_rule", log_type="sshd",
+                event_count=10, percentage=1000 / 53, status_percentage=20.0,
+            ),
+            LogTypeCount(
+                status="no_alerting_rule", log_type="windows_eventchannel",
+                event_count=40, percentage=4000 / 53, status_percentage=80.0,
+            ),
+        ),
         findings=(
             Finding(
                 finding_key="suppressed",
@@ -362,9 +381,10 @@ def _verifications() -> tuple[Verification, ...]:
 def test_a_verified_report_names_the_rule_the_archive_omitted() -> None:
     text = render_report(_verified_analysis(), _verifications())
 
-    suppressed, uncovered = text.split("[1] suppressed | windows_eventchannel", 1)[1].split(
-        "[2] uncovered | sshd", 1
-    )
+    assert text.index("Dropped\n-------") < text.index("Processed\n---------")
+    assert "[1] uncovered | sshd" in text
+    uncovered = text.split("[1] uncovered | sshd", 1)[1].split("Processed\n---------", 1)[0]
+    suppressed = text.split("[1] suppressed | windows_eventchannel", 1)[1]
     assert "    Rule: 61100\n    Level: 0\n" in suppressed
     assert "no_alerting_rule" not in suppressed
     assert "    Rule: -\n" not in suppressed
@@ -387,6 +407,82 @@ def test_the_effective_table_weights_states_by_events() -> None:
 
     assert rows[0] == ["uncovered", "1", "10", "20.00%"]
     assert rows[1] == ["suppressed", "1", "40", "80.00%"]
+
+
+def test_replayed_summary_separates_suppressed_from_dropped() -> None:
+    text = render_report(_verified_analysis(), _verifications())
+    lines = text.splitlines()
+    start = lines.index("Outcome (with replay)")
+    rows = [line.split() for line in lines[start + 3:start + 11]]
+
+    assert rows == [
+        ["Processed", "3", "5.66%", "-"],
+        ["Suppressed", "40", "75.47%", "-"],
+        ["suppressed", "40", "75.47%", "-"],
+        ["below_threshold", "0", "0.00%", "-"],
+        ["Dropped", "10", "18.87%", "100.00%"],
+        ["no_decoder", "0", "0.00%", "0.00%"],
+        ["uncovered", "10", "18.87%", "100.00%"],
+        ["Unresolved", "0", "0.00%", "-"],
+    ]
+    assert sum(int(rows[index][1]) for index in (0, 1, 4, 7)) == 53
+    start = lines.index("Log types (with replay)")
+    log_types = [line.split() for line in lines[start + 3:start + 5]]
+    assert log_types == [
+        ["windows_eventchannel", "40", "75.47%", "0", "40", "0", "0"],
+        ["sshd", "13", "24.53%", "3", "0", "10", "0"],
+    ]
+
+
+def test_replay_decoder_replaces_archive_decoder_and_log_type() -> None:
+    verification = replace(_verifications()[0], decoder="auditd")
+    text = render_report(_verified_analysis(), (verification, _verifications()[1]))
+
+    suppressed = text.split("[1] suppressed | auditd", 1)[1]
+    assert "    Decoder: auditd\n" in suppressed
+    assert "    Decoder: windows_eventchannel\n" not in suppressed
+    lines = text.splitlines()
+    start = lines.index("Log types (with replay)")
+    log_types = [line.split() for line in lines[start + 3:start + 5]]
+    assert log_types == [
+        ["auditd", "40", "75.47%", "0", "40", "0", "0"],
+        ["sshd", "13", "24.53%", "3", "0", "10", "0"],
+    ]
+
+
+def test_findings_sort_by_event_count_within_each_outcome() -> None:
+    base = _verified_analysis()
+    smaller_processed = replace(
+        base.findings[1], finding_key="processed-small",
+        observed_status="at_or_above_threshold", event_count=3,
+        observed_rule_id="321", observed_rule_level=5,
+    )
+    text = render_report(replace(base, findings=base.findings + (smaller_processed,)), _verifications())
+    processed = text.split("\nProcessed\n---------\n", 1)[1]
+
+    assert processed.index("[1] suppressed | windows_eventchannel") < processed.index(
+        "[2] at_or_above_threshold | sshd"
+    )
+    assert text.index("\nDropped\n-------\n") < text.index("\nProcessed\n---------\n")
+
+
+def test_below_threshold_replay_is_suppressed_not_dropped() -> None:
+    verification = replace(
+        _verifications()[0],
+        effective_state="below_threshold",
+        rule_id="100210",
+        rule_level=2,
+    )
+    text = render_report(_verified_analysis(), (verification,))
+
+    assert "[1] below_threshold | windows_eventchannel" in text
+    assert "    Rule: 100210\n    Level: 2\n" in text
+    rows = text.splitlines()
+    start = rows.index("Outcome (with replay)")
+    assert rows[start + 4].split() == ["Suppressed", "40", "75.47%", "-"]
+    assert rows[start + 6].split() == ["below_threshold", "40", "75.47%", "-"]
+    assert rows[start + 7].split() == ["Dropped", "0", "0.00%", "-"]
+    assert rows[start + 10].split() == ["Unresolved", "10", "18.87%", "-"]
 
 
 def test_a_verified_report_drops_the_note_it_has_answered() -> None:
@@ -416,6 +512,9 @@ def test_an_unverified_finding_says_why() -> None:
     assert "[2] unverified | sshd" in text
     assert "Replay: the logtest daemon reported an error for this sample" in text
     assert "[1] no_alerting_rule | windows_eventchannel" in text
+    lines = text.splitlines()
+    start = lines.index("Outcome (with replay)")
+    assert lines[start + 10].split() == ["Unresolved", "50", "94.34%", "-"]
 
 
 def test_an_unverified_report_is_unchanged() -> None:

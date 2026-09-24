@@ -27,6 +27,27 @@ _LOG_TYPE_COLUMN_WIDTHS = {column: max(12, len(column) + 2) for column in _LOG_T
 # wazuhcoverage.models.STATUSES for why.
 _AMBIGUOUS_STATUS = "no_alerting_rule"
 _EFFECTIVE_WIDTH = max(24, max(len(state) for state in EFFECTIVE_STATES) + 2)
+_RESOLVED_OUTCOMES = ("Processed", "Suppressed", "Dropped", "Unresolved")
+_RESOLVED_LOG_WIDTHS = {column: max(12, len(column) + 2) for column in _RESOLVED_OUTCOMES}
+_STATUS_OUTCOME = {
+    "at_or_above_threshold": "Processed",
+    "suppressed": "Suppressed",
+    "below_threshold": "Suppressed",
+    "no_decoder": "Dropped",
+    "uncovered": "Dropped",
+    "no_alerting_rule": "Unresolved",
+    "unverified": "Unresolved",
+}
+_FINDING_GROUPS = ("Dropped", "Processed", "Unresolved")
+_FINDING_GROUP = {
+    "no_decoder": "Dropped",
+    "uncovered": "Dropped",
+    "at_or_above_threshold": "Processed",
+    "suppressed": "Processed",
+    "below_threshold": "Processed",
+    "no_alerting_rule": "Unresolved",
+    "unverified": "Unresolved",
+}
 
 
 def render_report(
@@ -38,11 +59,11 @@ def render_report(
 ) -> str:
     """Render a compact human-readable report for one archive.
 
-    Without replays, the archive outcome and log-type tables show the observed
-    status. When replays are available, the effective-coverage table reports
-    their results instead; archive statuses cannot determine whether a rule
-    matched a suppressed event. Replayed findings use the effective verdict,
-    while findings without a replay retain their observed status.
+    Without replays, the outcome and log-type tables show archive observations.
+    With replays, the full-archive tables use replay verdicts for the findings
+    they cover and archive observations for the remainder. A matched rule below
+    the alert threshold is Suppressed, while a confirmed unmatched or undecoded
+    event is Dropped. Ambiguous or failed replays remain Unresolved.
     """
 
     lines: list[str] = [f"Archive: {analysis.path}"]
@@ -57,7 +78,11 @@ def render_report(
             f"Malformed lines skipped: {analysis.malformed_lines:,}",
         ]
     )
-    if not by_key:
+    if by_key:
+        status_counts, log_type_counts = _resolved_counts(analysis, by_key)
+        lines.extend(_resolved_outcome_table(status_counts, analysis.total_events))
+        lines.extend(_resolved_log_type_table(log_type_counts, analysis.total_events))
+    else:
         lines.extend(["", "Outcome", "-------", _outcome_row("Outcome", "Events", "% total", "% dropped")])
         lines.extend(_outcome_table(analysis))
         lines.extend(
@@ -89,35 +114,63 @@ def render_report(
     if not by_key:
         lines.extend(_no_alerting_rule_note(analysis))
 
-    for index, finding in enumerate(analysis.findings, start=1):
+    grouped: dict[str, list[tuple[Finding, Optional[Verification]]]] = {
+        group: [] for group in _FINDING_GROUPS
+    }
+    for finding in analysis.findings:
         verification = by_key.get(finding.finding_key)
         status = verification.effective_state if verification is not None else finding.observed_status
-        rule_id = verification.rule_id if verification is not None else finding.observed_rule_id
-        rule_level = verification.rule_level if verification is not None else finding.observed_rule_level
-        lines.extend(
-            [
-                f"[{index}] {status} | {finding.log_type or '-'}",
-                f"    Events: {finding.event_count:,}",
-                f"    Affected agents: {finding.affected_agents:,}",
-                f"    First seen: {finding.first_seen or '-'}",
-                f"    Last seen: {finding.last_seen or '-'}",
-                f"    Decoder: {finding.observed_decoder or '-'}",
-            ]
-        )
-        if rule_id is not None:
-            lines.append(f"    Rule: {rule_id}")
-        if rule_level is not None:
-            lines.append(f"    Level: {rule_level}")
-        lines.extend(
-            [
-                f"    Pattern: {_single_row(finding.message_pattern)}",
-                f"    Sample: {finding.sample_log}",
-            ]
-        )
-        lines.extend(_finding_verdict(verification))
-        lines.append("")
+        grouped[_FINDING_GROUP[status]].append((finding, verification))
+
+    for group in _FINDING_GROUPS:
+        entries = grouped[group]
+        if not entries:
+            continue
+        entries.sort(key=lambda item: (-item[0].event_count, item[0].finding_key))
+        lines.extend([group, "-" * len(group)])
+        for index, (finding, verification) in enumerate(entries, start=1):
+            lines.extend(_finding_rows(index, finding, verification))
+            lines.append("")
 
     return "\n".join(lines).rstrip() + "\n"
+
+
+def _finding_rows(index: int, finding: Finding, verification: Optional[Verification]) -> list[str]:
+    """Render a finding within its effective outcome group."""
+
+    status = verification.effective_state if verification is not None else finding.observed_status
+    rule_id = verification.rule_id if verification is not None else finding.observed_rule_id
+    rule_level = verification.rule_level if verification is not None else finding.observed_rule_level
+    decoder = (
+        verification.decoder
+        if verification is not None and verification.effective_state != "unverified"
+        else finding.observed_decoder
+    )
+    log_type = (
+        (decoder or finding.log_type)
+        if verification is not None and status != "unverified"
+        else finding.log_type
+    )
+    rows = [
+        f"[{index}] {status} | {log_type or '-'}",
+        f"    Events: {finding.event_count:,}",
+        f"    Affected agents: {finding.affected_agents:,}",
+        f"    First seen: {finding.first_seen or '-'}",
+        f"    Last seen: {finding.last_seen or '-'}",
+        f"    Decoder: {decoder or '-'}",
+    ]
+    if rule_id is not None:
+        rows.append(f"    Rule: {rule_id}")
+    if rule_level is not None:
+        rows.append(f"    Level: {rule_level}")
+    rows.extend(
+        [
+            f"    Pattern: {_single_row(finding.message_pattern)}",
+            f"    Sample: {finding.sample_log}",
+        ]
+    )
+    rows.extend(_finding_verdict(verification))
+    return rows
 
 
 def _outcome_table(analysis: ArchiveAnalysis) -> list[str]:
@@ -170,6 +223,99 @@ def _outcome_table(analysis: ArchiveAnalysis) -> list[str]:
         if item.status in DROPPED_STATUSES
     )
     return rows
+
+
+def _resolved_counts(
+    analysis: ArchiveAnalysis, by_key: dict[str, Verification]
+) -> tuple[dict[str, int], dict[Optional[str], dict[str, int]]]:
+    """Replace the archive bucket of each replayed finding exactly once."""
+
+    statuses = {item.status: item.event_count for item in analysis.status_counts}
+    log_types: dict[Optional[str], dict[str, int]] = {}
+    for item in analysis.log_type_counts:
+        counts = log_types.setdefault(item.log_type, {})
+        counts[item.status] = counts.get(item.status, 0) + item.event_count
+    for finding in analysis.findings:
+        verification = by_key.get(finding.finding_key)
+        if verification is not None:
+            old, new, count = finding.observed_status, verification.effective_state, finding.event_count
+            statuses[old] -= count
+            statuses[new] = statuses.get(new, 0) + count
+            log_types[finding.log_type][old] -= count
+            log_type = (verification.decoder or finding.log_type) if new != "unverified" else finding.log_type
+            type_counts = log_types.setdefault(log_type, {})
+            type_counts[new] = type_counts.get(new, 0) + count
+    return statuses, log_types
+
+
+def _resolved_outcome_table(statuses: dict[str, int], total: int) -> list[str]:
+    """Keep whole-archive totals while separating matched suppression from loss."""
+
+    outcomes = dict.fromkeys(_RESOLVED_OUTCOMES, 0)
+    for status, count in statuses.items():
+        outcomes[_STATUS_OUTCOME[status]] += count
+    rows = [
+        "",
+        "Outcome (with replay)",
+        "---------------------",
+        _outcome_row("Outcome", "Events", "% total", "% dropped"),
+    ]
+    for outcome, count in outcomes.items():
+        rows.append(
+            _outcome_row(
+                outcome, f"{count:,}", _percent(_percentage(count, total)),
+                _percent(100.0) if outcome == "Dropped" and count else "-",
+            )
+        )
+        if outcome in ("Suppressed", "Dropped"):
+            states = ("suppressed", "below_threshold") if outcome == "Suppressed" else ("no_decoder", "uncovered")
+            rows.extend(
+                _outcome_row(
+                    f"  {state}",
+                    f"{statuses.get(state, 0):,}",
+                    _percent(_percentage(statuses.get(state, 0), total)),
+                    _percent(_percentage(statuses.get(state, 0), count)) if outcome == "Dropped" and count else "-",
+                )
+                for state in states
+            )
+    return rows
+
+
+def _resolved_log_type_table(log_types: dict[Optional[str], dict[str, int]], total: int) -> list[str]:
+    """Include every log type, including those without replayed findings."""
+
+    rows = [
+        "",
+        "Log types (with replay)",
+        "-----------------------",
+        _resolved_log_type_row("Log type", "Events", "% total", {name: name for name in _RESOLVED_OUTCOMES}),
+    ]
+    for log_type, statuses in sorted(log_types.items(), key=lambda item: (-sum(item[1].values()), item[0] or "")):
+        counts = dict.fromkeys(_RESOLVED_OUTCOMES, 0)
+        for status, count in statuses.items():
+            counts[_STATUS_OUTCOME[status]] += count
+        event_count = sum(counts.values())
+        if not event_count:
+            continue
+        rows.append(
+            _resolved_log_type_row(
+                log_type or "-",
+                f"{event_count:,}",
+                _percent(_percentage(event_count, total)),
+                {name: f"{counts[name]:,}" for name in _RESOLVED_OUTCOMES},
+            )
+        )
+    return rows
+
+
+def _resolved_log_type_row(log_type: str, count: str, percentage: str, counts: dict[str, str]) -> str:
+    cells = [
+        f"{log_type:<{_LOG_TYPE_WIDTH}}",
+        f"{count:>{_COUNT_WIDTH}}",
+        f"{percentage:>{_PERCENT_WIDTH}}",
+    ]
+    cells.extend(f"{counts[name]:>{_RESOLVED_LOG_WIDTHS[name]}}" for name in _RESOLVED_OUTCOMES)
+    return "".join(cells).rstrip()
 
 
 def _log_type_cells(status_counts: dict[str, int]) -> dict[str, str]:
