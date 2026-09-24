@@ -5,7 +5,7 @@ The README covers the normal workflow. This page documents the exact CLI contrac
 ## Usage
 
 ```text
-wazuhcoverage [-n|--no-stats] [-s|--strict] [-f|--log-format FORMAT] [TARGET...]
+wazuhcoverage [-n|--no-stats | -j|--json | --html FILE] [-s|--strict] [-f|--log-format FORMAT] [TARGET...]
 wazuhcoverage (-V|--version)
 wazuhcoverage (-h|--help)
 ```
@@ -15,12 +15,14 @@ There are no subcommands. Each `TARGET` is a literal path, a glob, or `-` for st
 | Short | Long | Effect |
 | --- | --- | --- |
 | `-n` | `--no-stats` | Write one representative log line per finding to stdout. Progress and warnings remain on stderr. |
+| `-j` | `--json` | Write one machine-readable metric object per archive. Multiple archives use JSON Lines. |
+|  | `--html FILE` | Write an interactive HTML report for exactly one archive to `FILE`. |
 | `-s` | `--strict` | Reject an archive on its first unparseable line instead of skipping and counting malformed lines. |
 | `-f` | `--log-format FORMAT` | Log format supplied when findings are replayed through `wazuh-logtest`. Default: `syslog`. |
 | `-V` | `--version` | Print the installed version and exit. |
 | `-h` | `--help` | Print usage and exit. |
 
-The boolean short options may be clustered:
+The boolean short options may be clustered. `--no-stats`, `--json`, and `--html` are alternative output modes and cannot be combined:
 
 ```bash
 wazuhcoverage -sn "/archives/**/*.json.gz"
@@ -70,6 +72,9 @@ Reports and sample rows go to stdout. Progress, warnings, and the final `Matched
 
 One archive failing does not stop the remaining targets.
 
+With `--json`, stdout contains one JSON object per archive. A multi-target run therefore uses JSON Lines rather than one enclosing array. Each object includes the archive label, alert threshold and source, the five primary metrics, and complete per-log-type rates and contributions. Metric rates are fractions between `0` and `1`; unavailable replay-dependent metrics contain null values and `"available": false`.\n\nWith `--html FILE`, exactly one archive must be selected. The CLI writes the report to `FILE`, leaves stdout empty, and refuses an output path that refers to the input archive, including through a symbolic or hard link. The generated HTML contains the report structure, CSS, and application JavaScript; pinned Pico CSS and ECharts resources are loaded from jsDelivr. The Dashboard uses archive-only Processed/Dropped semantics when replay is unavailable and replay-resolved Processed/Suppressed/Dropped/Unresolved semantics when verification results exist. Tables remain available when charts cannot be rendered, and finding samples are HTML-escaped before they are written.
+
+
 | Exit code | Meaning |
 | --- | --- |
 | `0` | Every matched archive was processed. |
@@ -106,7 +111,11 @@ Every parsed event is assigned to exactly one observed bucket:
 
 The CLI reads `<alerts><log_alert_level>` from `/var/ossec/etc/ossec.conf` when that local configuration is readable. If it is absent or cannot be read, the CLI assumes Wazuh's documented default of `3`. The resolved value and its provenance are printed near the top of every statistics report, for example `Alert threshold: 6 (from /var/ossec/etc/ossec.conf)` or `Alert threshold: 3 (Wazuh default assumed; could not read /var/ossec/etc/ossec.conf)`. The same resolved value is used for both archive classification and manager replay. Library callers choose the threshold explicitly; see [API.md](API.md).
 
-Without replay results, the report starts with an archive outcome table, then breaks those observed outcomes down by log type, followed by grouped findings. `% total` uses all parsed events as its denominator. `% dropped` uses only dropped events.
+Without replay results, the report starts with an archive outcome table, then breaks those observed outcomes down by log type. A Metrics section follows with malformed input, decoder failure, uncovered, below-threshold, and unresolved measurements. Every displayed percentage is accompanied by its count and denominator. Replay-dependent uncovered coverage is shown as unavailable when it cannot be established.
+
+The report also shows the largest metric contributors by log type. Each contributor row includes both the local rate within that log type and its contribution to the global condition. Complete per-log-type metrics remain available through the Python API and `--json` output. See [METRICS.md](METRICS.md) for formulas and interpretation limits.
+
+Grouped findings follow the statistical sections. `% total` uses all parsed events as its denominator. `% dropped` uses only dropped events.
 
 A finding represents a group of similar uncovered events. It includes event count, affected agents, time range, observed decoder/rule information, a mined message pattern, and one real sample from the archive. The sample is suitable for replay: embedded CR/LF runs are collapsed to one space so one source event remains one input line.
 

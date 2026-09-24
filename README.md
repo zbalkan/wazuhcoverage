@@ -3,7 +3,7 @@
 [![CI](https://github.com/zbalkan/wazuhcoverage/actions/workflows/ci.yml/badge.svg)](https://github.com/zbalkan/wazuhcoverage/actions/workflows/ci.yml)
 [![Dependency Graph](https://github.com/zbalkan/wazuhcoverage/actions/workflows/dependabot/update-graph/badge.svg)](https://github.com/zbalkan/wazuhcoverage/actions/workflows/dependabot/update-graph)
 
-`wazuhcoverage` measures what happens to events captured in Wazuh JSON archives. It classifies each event by decoder/rule outcome, groups uncovered events into actionable findings, and keeps one real sample per finding for replay through `wazuh-logtest`.
+`wazuhcoverage` measures what happens to events captured in Wazuh JSON archives. It classifies each event by decoder/rule outcome, groups unresolved events into actionable findings, derives auditable reliability and efficiency metrics, and keeps one real sample per finding for replay through `wazuh-logtest`.
 
 It reads `archives.json` and `archives.json.gz` produced when Wazuh JSON archiving is enabled and never modifies them. See the Wazuh documentation for [archiving event logs](https://documentation.wazuh.com/current/user-manual/manager/event-logging.html#archiving-event-logs).
 
@@ -54,7 +54,7 @@ cat logs.json | wazuhcoverage
 ssh manager "cat /var/ossec/logs/archives/2026/Sep/ossec-archive-18.json.gz" | wazuhcoverage
 ```
 
-Run `wazuhcoverage --help` for the short CLI summary. Target resolution, stdin behaviour, strict parsing, exit codes, output streams, and replay options are documented in [docs/CLI.md](docs/CLI.md).
+For machine-readable metrics, use `wazuhcoverage --json archive.json.gz`. Multiple archives are emitted as JSON Lines. For an interactive two-tab report, use `wazuhcoverage --html report.html archive.json.gz`. The generated file contains the report HTML, CSS and application JavaScript; pinned Pico CSS and ECharts resources are loaded from jsDelivr. Run `wazuhcoverage --help` for the short CLI summary. Target resolution, stdin behaviour, strict parsing, exit codes, output streams, and replay options are documented in [docs/CLI.md](docs/CLI.md).
 
 ## Coverage model
 
@@ -70,6 +70,14 @@ Every parsed event lands in exactly one observed bucket:
 The CLI reads `<alerts><log_alert_level>` from `/var/ossec/etc/ossec.conf` when the local manager configuration is available. Otherwise it assumes Wazuh's default threshold of `3`. The report shows both the threshold and its source before the statistics. The Python API keeps the threshold explicit for callers analysing archives elsewhere.
 
 `no_alerting_rule` needs care. A rule-less archive record does not, by itself, prove that no rule was evaluated. Wazuh can produce the same observable archive state for events that require different interpretations. When replay is available, `wazuhcoverage` uses `wazuh-logtest` to refine the result. See [CAVEATS.md](docs/CAVEATS.md) before treating coverage numbers as ground truth.
+
+## Metrics
+
+The statistics report derives five independent measurements: malformed input, decoder failure, replay-confirmed uncovered coverage, below-threshold processing, and unresolved outcomes. Every metric retains its numerator and denominator; replay-dependent measurements are reported as unavailable when the evidence is incomplete rather than silently becoming zero.
+
+The same measurements are available by log type with both the local rate and the log type's contribution to the estate-wide condition. The human report shows the largest contributors, while the Python API and `--json` output retain the complete per-log-type set.
+
+Metrics begin at the archive boundary. They do not measure events that should have been generated but never reached the archive, and they are not combined into a composite health or coverage score. See [METRICS.md](docs/METRICS.md) for formulas and interpretation limits.
 
 ## Findings
 
@@ -90,7 +98,8 @@ For Wazuh itself, refer to the upstream [alert-threshold documentation](https://
 ## Documentation
 
 - [Command-line reference](docs/CLI.md) — targets, streams, report semantics, exit codes, and replay behaviour.
-- [Python API](docs/API.md) — analysis models and verification API.
+- [Python API](docs/API.md) — analysis, verification, and metric APIs.
+- [Metrics](docs/METRICS.md) — formulas, replay semantics, log-type dimensions, and interpretation limits.
 - [Caveats](docs/CAVEATS.md) — Wazuh behaviours that affect interpretation.
 - [Design notes](docs/DESIGN.md) — implementation rationale, template-mining measurements, and dependency constraints.
 - [Third-party software](docs/THIRD_PARTY.md) — direct dependency license references.

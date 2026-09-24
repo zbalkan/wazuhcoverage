@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import io
+import json
 import os
 import shutil
 import signal
@@ -19,6 +20,8 @@ from typing import Any, Optional, TextIO, TypeVar, overload
 from wazuhcoverage import __version__
 from wazuhcoverage.analysis import DEFAULT_ALERT_THRESHOLD, analyze_archive
 from wazuhcoverage.config import DEFAULT_OSSEC_CONF, read_alert_threshold
+from wazuhcoverage.html_report import render_html_report
+from wazuhcoverage.metrics import calculate_metrics, metrics_to_dict
 from wazuhcoverage.models import Verification
 from wazuhcoverage.report import render_report
 from wazuhcoverage.targets import resolve_targets
@@ -79,6 +82,9 @@ class _ArgumentParser(argparse.ArgumentParser):
         incompatible_flags: set[str] = {
             "-n",
             "--no-stats",
+            "-j",
+            "--json",
+            "--html",
             "-s",
             "--strict",
             "-f",
@@ -98,9 +104,9 @@ class _ArgumentParser(argparse.ArgumentParser):
 
 
 def build_parser() -> argparse.ArgumentParser:
-    # The two behaviour flags are single-character store_true options, so
-    # argparse accepts them merged into one cluster (-ns, -sn) as well as
-    # separately. Keeping them single-character is what preserves that.
+    # The short boolean options are single-character store_true options, so
+    # compatible flags can be clustered. -n, -j and --html are mutually
+    # exclusive output modes; any of them may still be combined with -s.
     #
     # -f takes a value, which makes it the one short flag whose position in a
     # cluster matters. It may close one, because argparse reads the rest of
@@ -123,11 +129,24 @@ def build_parser() -> argparse.ArgumentParser:
         version=f"%(prog)s {__version__}",
         help="Print the installed version and exit.",
     )
-    parser.add_argument(
+    output = parser.add_mutually_exclusive_group()
+    output.add_argument(
         "-n",
         "--no-stats",
         action="store_true",
         help="Write only one representative sample per finding to stdout; suitable for piping to logtest.",
+    )
+    output.add_argument(
+        "-j",
+        "--json",
+        action="store_true",
+        help="Write one JSON metric object per archive to stdout; multiple archives use JSON Lines.",
+    )
+    output.add_argument(
+        "--html",
+        type=Path,
+        metavar="FILE",
+        help="Write an interactive HTML report for one archive to FILE.",
     )
     parser.add_argument(
         "-s",
@@ -176,6 +195,20 @@ def _run(args: argparse.Namespace) -> int:
         return 2
 
     targets = resolve_targets(paths)
+
+    matched = len(targets) + (1 if read_stdin else 0)
+    if args.html is not None and matched != 1:
+        print("wazuhcoverage: --html requires exactly one archive", file=sys.stderr)
+        return 2
+
+    if (
+        args.html is not None
+        and not read_stdin
+        and targets
+        and _same_file(args.html, targets[0])
+    ):
+        print("wazuhcoverage: HTML output must not overwrite the input archive", file=sys.stderr)
+        return 2
 
     if not targets and not read_stdin:
         print("wazuhcoverage: no files matched the supplied targets", file=sys.stderr)
@@ -237,7 +270,6 @@ def _run(args: argparse.Namespace) -> int:
             failed += 1
             print(f"wazuhcoverage: failed {archive}: {exc}", file=sys.stderr)
 
-    matched = len(targets) + (1 if read_stdin else 0)
     print(
         f"Matched: {matched} | Processed: {processed} | Failed: {failed}",
         file=sys.stderr,
@@ -298,6 +330,17 @@ def _stop_if_terminated() -> None:
 
     if _termination_status is not None:
         raise SystemExit(_termination_status)
+
+
+def _same_file(first: Path, second: Path) -> bool:
+    """Protect an input archive from direct, symlink, or hard-link overwrite."""
+
+    if first.resolve() == second.resolve():
+        return True
+    try:
+        return first.exists() and second.exists() and first.samefile(second)
+    except OSError:
+        return False
 
 
 def _resolve_alert_threshold() -> tuple[int, str]:
@@ -362,11 +405,32 @@ def _report_one(
             file=sys.stderr,
         )
 
+    rendered = analysis if label == analysis.path else replace(analysis, path=label)
     if args.no_stats:
         for finding in analysis.findings:
             sys.stdout.write(f"{finding.sample_log}\n")
+    elif args.json:
+        payload = metrics_to_dict(calculate_metrics(rendered, verifications))
+        payload.update(
+            {
+                "archive": str(rendered.path),
+                "alert_threshold": alert_threshold,
+                "threshold_source": threshold_source,
+            }
+        )
+        sys.stdout.write(json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n")
+    elif args.html is not None:
+        args.html.write_text(
+            render_html_report(
+                rendered,
+                verifications,
+                alert_threshold=alert_threshold,
+                threshold_source=threshold_source,
+            ),
+            encoding="utf-8",
+        )
+        print(f"HTML report: {args.html}", file=sys.stderr)
     else:
-        rendered = analysis if label == analysis.path else replace(analysis, path=label)
         sys.stdout.write(
             render_report(
                 rendered,
@@ -378,7 +442,8 @@ def _report_one(
 
     # A successful flush is part of successful processing. This matters when
     # stdout is a pipe and the downstream consumer exits early.
-    sys.stdout.flush()
+    if args.html is None:
+        sys.stdout.flush()
 
 
 def _stdin_is_a_terminal() -> bool:

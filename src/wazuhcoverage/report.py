@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Literal, Optional
 
+from wazuhcoverage.metrics import MetricSnapshot, MetricValue, calculate_metrics, resolve_effective_counts
 from wazuhcoverage.models import (
     DROPPED_STATUSES,
     EFFECTIVE_STATES,
@@ -12,6 +13,13 @@ from wazuhcoverage.models import (
     ArchiveAnalysis,
     Finding,
     Verification,
+)
+from wazuhcoverage.presentation import (
+    FINDING_GROUPS,
+    RESOLVED_OUTCOMES,
+    finding_group,
+    outcome_counts,
+    present_finding,
 )
 
 _PROCESSED_LABEL = "Processed"
@@ -34,27 +42,7 @@ _LOG_TYPE_COLUMN_WIDTHS = {column: max(12, len(column) + 2) for column in _LOG_T
 # wazuhcoverage.models.STATUSES for why.
 _AMBIGUOUS_STATUS = "no_alerting_rule"
 _EFFECTIVE_WIDTH = max(24, max(len(state) for state in EFFECTIVE_STATES) + 2)
-_RESOLVED_OUTCOMES = ("Processed", "Suppressed", "Dropped", "Unresolved")
-_RESOLVED_LOG_WIDTHS: dict[str, int] = {column: max(12, len(column) + 2) for column in _RESOLVED_OUTCOMES}
-_STATUS_OUTCOME: dict[str, str] = {
-    "at_or_above_threshold": "Processed",
-    "suppressed": "Suppressed",
-    "below_threshold": "Suppressed",
-    "no_decoder": "Dropped",
-    "uncovered": "Dropped",
-    "no_alerting_rule": "Unresolved",
-    "unverified": "Unresolved",
-}
-_FINDING_GROUPS: tuple[str, str, str] = ("Dropped", "Processed", "Unresolved")
-_FINDING_GROUP: dict[str, str] = {
-    "no_decoder": "Dropped",
-    "uncovered": "Dropped",
-    "at_or_above_threshold": "Processed",
-    "suppressed": "Processed",
-    "below_threshold": "Processed",
-    "no_alerting_rule": "Unresolved",
-    "unverified": "Unresolved",
-}
+_RESOLVED_LOG_WIDTHS: dict[str, int] = {column: max(12, len(column) + 2) for column in RESOLVED_OUTCOMES}
 
 
 def render_report(
@@ -86,7 +74,7 @@ def render_report(
         ]
     )
     if by_key:
-        status_counts, log_type_counts = _resolved_counts(analysis, by_key)
+        status_counts, log_type_counts = resolve_effective_counts(analysis, verifications)
         lines.extend(_resolved_outcome_table(status_counts, analysis.total_events))
         lines.extend(_resolved_log_type_table(log_type_counts, analysis.total_events))
     else:
@@ -115,6 +103,9 @@ def render_report(
                 )
             )
 
+    metrics = calculate_metrics(analysis, verifications)
+    lines.extend(_metrics_table(metrics))
+    lines.extend(_metric_contributors(metrics))
     lines.extend(_effective_table(analysis, by_key))
 
     lines.extend(["", f"Findings: {len(analysis.findings):,}", ""])
@@ -122,14 +113,14 @@ def render_report(
         lines.extend(_no_alerting_rule_note(analysis))
 
     grouped: dict[str, list[tuple[Finding, Optional[Verification]]]] = {
-        group: [] for group in _FINDING_GROUPS
+        group: [] for group in FINDING_GROUPS
     }
     for finding in analysis.findings:
         verification = by_key.get(finding.finding_key)
         status = verification.effective_state if verification is not None else finding.observed_status
-        grouped[_FINDING_GROUP[status]].append((finding, verification))
+        grouped[finding_group(status)].append((finding, verification))
 
-    for group in _FINDING_GROUPS:
+    for group in FINDING_GROUPS:
         entries = grouped[group]
         if not entries:
             continue
@@ -145,38 +136,29 @@ def render_report(
 def _finding_rows(index: int, finding: Finding, verification: Optional[Verification]) -> list[str]:
     """Render a finding within its effective outcome group."""
 
-    status = verification.effective_state if verification is not None else finding.observed_status
-    rule_id = verification.rule_id if verification is not None else finding.observed_rule_id
-    rule_level = verification.rule_level if verification is not None else finding.observed_rule_level
-    decoder = (
-        verification.decoder
-        if verification is not None and verification.effective_state != "unverified"
-        else finding.observed_decoder
-    )
-    log_type = (
-        (decoder or finding.log_type)
-        if verification is not None and status != "unverified"
-        else finding.log_type
-    )
+    presented = present_finding(finding, verification)
     rows = [
-        f"[{index}] {status} | {log_type or '-'}",
+        f"[{index}] {presented.status} | {presented.log_type or '-'}",
         f"    Events: {finding.event_count:,}",
         f"    Affected agents: {finding.affected_agents:,}",
         f"    First seen: {finding.first_seen or '-'}",
         f"    Last seen: {finding.last_seen or '-'}",
-        f"    Decoder: {decoder or '-'}",
+        f"    Decoder: {presented.decoder or '-'}",
     ]
-    if rule_id is not None:
-        rows.append(f"    Rule: {rule_id}")
-    if rule_level is not None:
-        rows.append(f"    Level: {rule_level}")
+    if presented.rule_id is not None:
+        rows.append(f"    Rule: {presented.rule_id}")
+    if presented.rule_level is not None:
+        rows.append(f"    Level: {presented.rule_level}")
     rows.extend(
         [
             f"    Pattern: {_single_row(finding.message_pattern)}",
             f"    Sample: {finding.sample_log}",
         ]
     )
-    rows.extend(_finding_verdict(verification))
+    if presented.rule_description:
+        rows.append(f"    Matched: {_single_row(presented.rule_description)}")
+    if presented.replay_error:
+        rows.append(f"    Replay: {_single_row(presented.replay_error)}")
     return rows
 
 
@@ -232,35 +214,10 @@ def _outcome_table(analysis: ArchiveAnalysis) -> list[str]:
     return rows
 
 
-def _resolved_counts(
-    analysis: ArchiveAnalysis, by_key: dict[str, Verification]
-) -> tuple[dict[str, int], dict[Optional[str], dict[str, int]]]:
-    """Replace the archive bucket of each replayed finding exactly once."""
-
-    statuses = {item.status: item.event_count for item in analysis.status_counts}
-    log_types: dict[Optional[str], dict[str, int]] = {}
-    for item in analysis.log_type_counts:
-        counts = log_types.setdefault(item.log_type, {})
-        counts[item.status] = counts.get(item.status, 0) + item.event_count
-    for finding in analysis.findings:
-        verification = by_key.get(finding.finding_key)
-        if verification is not None:
-            old, new, count = finding.observed_status, verification.effective_state, finding.event_count
-            statuses[old] -= count
-            statuses[new] = statuses.get(new, 0) + count
-            log_types[finding.log_type][old] -= count
-            log_type = (verification.decoder or finding.log_type) if new != "unverified" else finding.log_type
-            type_counts = log_types.setdefault(log_type, {})
-            type_counts[new] = type_counts.get(new, 0) + count
-    return statuses, log_types
-
-
 def _resolved_outcome_table(statuses: dict[str, int], total: int) -> list[str]:
     """Keep whole-archive totals while separating matched suppression from loss."""
 
-    outcomes: dict[Literal['Processed', 'Suppressed', 'Dropped', 'Unresolved'], int] = dict.fromkeys(_RESOLVED_OUTCOMES, 0)
-    for status, count in statuses.items():
-        outcomes[_STATUS_OUTCOME[status]] += count  # type: ignore
+    outcomes = outcome_counts(statuses, resolved=True)
     rows = [
         "",
         "Outcome (with replay)",
@@ -295,12 +252,10 @@ def _resolved_log_type_table(log_types: dict[Optional[str], dict[str, int]], tot
         "",
         "Log types (with replay)",
         "-----------------------",
-        _resolved_log_type_row("Log type", "Events", "% total", {name: name for name in _RESOLVED_OUTCOMES}),
+        _resolved_log_type_row("Log type", "Events", "% total", {name: name for name in RESOLVED_OUTCOMES}),
     ]
     for log_type, statuses in sorted(log_types.items(), key=lambda item: (-sum(item[1].values()), item[0] or "")):
-        counts: dict[Literal['Processed', 'Suppressed', 'Dropped', 'Unresolved'], int] = dict.fromkeys(_RESOLVED_OUTCOMES, 0)
-        for status, count in statuses.items():
-            counts[_STATUS_OUTCOME[status]] += count  # type: ignore
+        counts = outcome_counts(statuses, resolved=True)
         event_count = sum(counts.values())
         if not event_count:
             continue
@@ -309,7 +264,7 @@ def _resolved_log_type_table(log_types: dict[Optional[str], dict[str, int]], tot
                 log_type or "-",
                 f"{event_count:,}",
                 _percent(_percentage(event_count, total)),
-                {name: f"{counts[name]:,}" for name in _RESOLVED_OUTCOMES},
+                {name: f"{counts[name]:,}" for name in RESOLVED_OUTCOMES},
             )
         )
     return rows
@@ -321,7 +276,7 @@ def _resolved_log_type_row(log_type: str, count: str, percentage: str, counts: d
         f"{count:>{_COUNT_WIDTH}}",
         f"{percentage:>{_PERCENT_WIDTH}}",
     ]
-    cells.extend(f"{counts[name]:>{_RESOLVED_LOG_WIDTHS[name]}}" for name in _RESOLVED_OUTCOMES)
+    cells.extend(f"{counts[name]:>{_RESOLVED_LOG_WIDTHS[name]}}" for name in RESOLVED_OUTCOMES)
     return "".join(cells).rstrip()
 
 
@@ -335,6 +290,91 @@ def _log_type_cells(status_counts: dict[str, int]) -> dict[str, str]:
     }
     cells.update({status: f"{status_counts.get(status, 0):,}" for status in DROPPED_STATUSES})
     return cells
+
+
+def _metrics_table(snapshot: MetricSnapshot) -> list[str]:
+    """Render the five primary metrics with their numerator and denominator."""
+
+    rows = [
+        "",
+        "Metrics",
+        "-------",
+        _metric_row("Metric", "Count / denominator", "Rate"),
+        _metric_value_row("Malformed input", snapshot.malformed_rate),
+        _metric_value_row("Decoder failure", snapshot.decoder_failure_rate),
+        _metric_value_row("Uncovered", snapshot.uncovered_rate),
+        _metric_value_row("Below threshold", snapshot.below_threshold_rate),
+        _metric_value_row("Unresolved", snapshot.uncertainty_rate),
+    ]
+    return rows
+
+
+def _metric_contributors(snapshot: MetricSnapshot) -> list[str]:
+    """Show the largest log-type contributors while preserving local severity."""
+
+    groups = (
+        ("Decoder failure", "decoder_failure_rate", "decoder_failure_contribution"),
+        ("Uncovered", "uncovered_rate", "uncovered_contribution"),
+        ("Below threshold", "below_threshold_rate", "below_threshold_contribution"),
+    )
+    rows: list[str] = []
+
+    for label, local_name, contribution_name in groups:
+        candidates = []
+        for item in snapshot.log_types:
+            local = getattr(item, local_name)
+            contribution = getattr(item, contribution_name)
+            if (
+                not local.available
+                or local.count is None
+                or local.count == 0
+                or not contribution.available
+                or contribution.ratio is None
+            ):
+                continue
+            candidates.append((item, local, contribution))
+
+        candidates.sort(
+            key=lambda entry: (
+                -(entry[2].ratio or 0.0),
+                -(entry[1].count or 0),
+                entry[0].log_type or "",
+            )
+        )
+        if not candidates:
+            continue
+
+        if not rows:
+            rows.extend(["", "Largest metric contributors", "---------------------------"])
+        rows.append(label)
+        for item, local, contribution in candidates[:3]:
+            local_rate = "n/a" if local.ratio is None else _ratio_percent(local.ratio)
+            contribution_rate = _ratio_percent(contribution.ratio)
+            rows.append(
+                f"  {item.log_type or '-'}: {local.count:,} events | "
+                f"local {local_rate} | contribution {contribution_rate}"
+            )
+
+    return rows
+
+
+def _metric_value_row(label: str, metric: MetricValue) -> str:
+    if not metric.available:
+        return f"{label:<24}unavailable without complete replay"
+    if metric.count is None or metric.denominator is None:
+        return f"{label:<24}unavailable"
+
+    count = f"{metric.count:,} / {metric.denominator:,}"
+    rate = "n/a" if metric.ratio is None else _ratio_percent(metric.ratio)
+    return _metric_row(label, count, rate)
+
+
+def _metric_row(label: str, count: str, rate: str) -> str:
+    return f"{label:<24}{count:>24}{rate:>12}".rstrip()
+
+
+def _ratio_percent(value: float) -> str:
+    return _percent(value * 100.0)
 
 
 def _effective_table(analysis: ArchiveAnalysis, by_key: dict[str, Verification]) -> list[str]:
@@ -375,21 +415,6 @@ def _effective_table(analysis: ArchiveAnalysis, by_key: dict[str, Verification])
         for state in EFFECTIVE_STATES
         if findings.get(state, 0)
     )
-    return rows
-
-
-def _finding_verdict(verification: Optional[Verification]) -> list[str]:
-    """Render additional replay details without repeating the finding's verdict."""
-
-    if verification is None:
-        return []
-
-    rows: list[str] = []
-
-    if verification.rule_description:
-        rows.append(f"    Matched: {_single_row(verification.rule_description)}")
-    if verification.error:
-        rows.append(f"    Replay: {_single_row(verification.error)}")
     return rows
 
 

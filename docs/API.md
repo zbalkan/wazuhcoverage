@@ -8,8 +8,13 @@ from wazuhcoverage import (
     ArchiveAnalysis,
     Finding,
     LogTypeCount,
+    LogTypeMetrics,
+    MetricSnapshot,
+    MetricValue,
     StatusCount,
     analyze_archive,
+    calculate_metrics,
+    metrics_to_dict,
 )
 
 analysis = analyze_archive("/archives/2026/09/archive.json.gz", alert_threshold=3)
@@ -31,6 +36,9 @@ for finding in analysis.findings:
 | `ArchiveAnalysis` | `path`, `total_events`, `malformed_lines`, `status_counts`, `log_type_counts`, `findings` |
 | `StatusCount` | `status`, `event_count`, `percentage` |
 | `LogTypeCount` | `status`, `log_type`, `event_count`, `percentage`, `status_percentage` |
+| `MetricValue` | `count`, `denominator`, `ratio`, `available` |
+| `LogTypeMetrics` | `log_type`, `event_count`, local rates and global contributions for decoder failure, uncovered, and below-threshold populations |
+| `MetricSnapshot` | `total_events`, `malformed_lines`, five primary metrics, `log_types` |
 | `Finding` | `finding_key`, `observed_status`, `log_type`, `message_pattern`, `event_count`, `affected_agents`, `first_seen`, `last_seen`, `observed_decoder`, `observed_location`, `observed_rule_id`, `observed_rule_level`, `sample_log` |
 | `Verification` | `finding_key`, `effective_state`, `logtest_status`, `decoder`, `rule_id`, `rule_level`, `rule_description`, `rule_groups`, `error` |
 
@@ -39,6 +47,29 @@ for finding in analysis.findings:
 All models are frozen dataclasses and every collection is a tuple, so a result can be cached or shared without defensive copying. `LogTypeCount.percentage` is the pair's share of the whole archive; `status_percentage` is its share of that one bucket, which ranks a log type inside a small bucket that a whole-archive percentage would flatten to nothing. The package is `py.typed`, and annotations resolve under `typing.get_type_hints()` on every supported interpreter.
 
 Glob expansion, report rendering, stdout and stderr, and exit codes are CLI concerns and are deliberately outside the analysis API; see [CLI.md](CLI.md).
+
+## Deriving metrics
+
+`calculate_metrics(analysis, verifications=())` derives metrics from an existing `ArchiveAnalysis` and optional `Verification` sequence. It does not reopen the archive or access Wazuh.
+
+```python
+from wazuhcoverage import analyze_archive, calculate_metrics, metrics_to_dict
+
+analysis = analyze_archive("/archives/2026/09/archive.json.gz")
+snapshot = calculate_metrics(analysis)
+
+print(snapshot.decoder_failure_rate.count)
+print(snapshot.decoder_failure_rate.denominator)
+print(snapshot.decoder_failure_rate.ratio)
+
+payload = metrics_to_dict(snapshot)
+```
+
+A `MetricValue` always makes availability explicit. Measured metrics carry `count` and `denominator`; `ratio` is a fraction between `0` and `1`. An empty denominator has `ratio=None`. A replay-dependent metric that cannot yet be established has `available=False` and null count, denominator, and ratio.
+
+The primary metrics are malformed rate, decoder failure rate, uncovered rate, below-threshold rate, and uncertainty rate. `MetricSnapshot.log_types` carries the full per-log-type local rates and contributions. See [METRICS.md](METRICS.md) for formulas, replay behavior, and interpretation limits.
+
+`metrics_to_dict()` returns a JSON-serializable dictionary. It preserves ratios as fractions; percentage formatting is a presentation concern.
 
 ## Verifying findings
 

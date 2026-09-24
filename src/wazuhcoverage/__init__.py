@@ -1,6 +1,7 @@
 """Public API for Wazuh archive coverage analysis."""
 
 from .analysis import DEFAULT_ALERT_THRESHOLD, analyze_archive
+from .metrics import LogTypeMetrics, MetricSnapshot, MetricValue, calculate_metrics, metrics_to_dict
 from .models import (
     DROPPED_STATUSES,
     EFFECTIVE_STATES,
@@ -23,10 +24,15 @@ __all__ = [
     "ArchiveAnalysis",
     "Finding",
     "LogTypeCount",
+    "LogTypeMetrics",
+    "MetricSnapshot",
+    "MetricValue",
     "StatusCount",
     "Verification",
     "analyze_archive",
+    "calculate_metrics",
+    "metrics_to_dict",
     "verify_findings",
 ]
 
-__version__ = "0.6.2"
+__version__ = "0.7.0"
