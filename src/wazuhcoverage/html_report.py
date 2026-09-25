@@ -129,6 +129,22 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
             border-left: 4px solid var(--wazuh-yellow);
         }
 
+        article,
+        [data-tab-panel] {
+            min-width: 0;
+        }
+
+        figure {
+            max-width: 100%;
+            overflow-x: auto;
+        }
+
+        figure table {
+            width: max-content;
+            min-width: 100%;
+            margin-bottom: 0;
+        }
+
         table {
             font-size: 0.9rem;
         }
@@ -136,6 +152,9 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
         th.numeric,
         td.numeric {
             text-align: right;
+        }
+
+        td.numeric {
             white-space: nowrap;
         }
 
