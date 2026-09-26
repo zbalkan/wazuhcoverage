@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, BinaryIO, Optional, Union
 
 from wazuhcoverage.models import STATUSES, ArchiveAnalysis, Finding, LogTypeCount, StatusCount
+from wazuhcoverage.preprocessing import install_preprocessor
 
 try:
     from drain3 import TemplateMiner
@@ -86,7 +87,7 @@ def _connect() -> Generator[DuckDBPyConnection, None, None]:
 # 0.58 exploded the template count from 25 to 93; 0.56 and 0.57 were the only
 # values with neither defect on every seed, so the midpoint of that plateau is
 # taken with margin on both sides. Re-run tools/tune_drain.py after changing
-# the normalizer, the corpus or the drain3 version.
+# the preprocessor, the corpus or the drain3 version.
 _DRAIN_SIM_TH = 0.56
 # Depth of the prefix tree, in tokens plus two sentinel levels. Left at the
 # library default: at the chosen threshold a depth of 3 produced identical
@@ -129,7 +130,7 @@ def _build_template_miner() -> TemplateMiner:
     # merge, because the tokens that distinguish those families carry digits
     # inside a larger token and are wildcarded either way.
     config.parametrize_numeric_tokens = True
-    # No masking instructions are registered: the SQL normalizer already applies
+    # No masking instructions are registered: the preprocessor already applies
     # the conservative masks this project documents, and a second masking pass
     # would silently widen them beyond what the README promises.
     config.masking_instructions = []
@@ -163,7 +164,7 @@ def analyze_archive(
     Unresolved events are grouped by a Drain template mined from the archive,
     which collapses the variants regex masks cannot reach -- usernames,
     hostnames, paths and other categorical tokens. Mining is the only grouping
-    engine; the regex normalizer runs ahead of it as a masking pass.
+    engine; the preprocessor runs ahead of it as a masking pass.
 
     A line DuckDB cannot parse as a JSON object is skipped rather than failing
     the whole archive, and the number of such lines is reported as
@@ -193,6 +194,7 @@ def _analyze(archive: Path, alert_threshold: int, skip_malformed: bool) -> Archi
         connection.execute("SET TimeZone = 'UTC'")
         _create_events(connection, archive, skip_malformed=skip_malformed)
         _create_views(connection, alert_threshold)
+        install_preprocessor(connection)
         _create_template_map(connection, _build_template_miner())
         _create_finding_views(connection)
 
@@ -414,46 +416,6 @@ def _create_views(connection: DuckDBPyConnection, alert_threshold: int) -> None:
         """
     )
 
-    # Conservative normalization: common timestamp prefixes, UUIDs, long hex
-    # tokens and long decimal IDs. Short numbers, IPs, ports, usernames, paths,
-    # event IDs and status codes are intentionally retained because they can
-    # materially change detection semantics. It is a macro rather than a view
-    # column so each step applies it only to the rows it needs: once per mined
-    # event to hash it, and once per distinct message to mine it.
-    connection.execute(
-        r"""
-        CREATE TEMP MACRO normalize_log(log) AS
-        trim(
-            regexp_replace(
-                regexp_replace(
-                    regexp_replace(
-                        regexp_replace(
-                            regexp_replace(
-                                coalesce(log, ''),
-                                '^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[[:space:]]+[0-9]{1,2}[[:space:]]+[0-9]{2}:[0-9]{2}:[0-9]{2}',
-                                '<TIMESTAMP>',
-                                'c'
-                            ),
-                            '^[0-9]{4}-[0-9]{2}-[0-9]{2}[T ][0-9]{2}:[0-9]{2}:[0-9]{2}([.,][0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})?',
-                            '<TIMESTAMP>',
-                            'c'
-                        ),
-                        '[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}',
-                        '<UUID>',
-                        'g'
-                    ),
-                    '\b(0x)?[0-9A-Fa-f]{16,}\b',
-                    '<HEX>',
-                    'g'
-                ),
-                '\b[0-9]{5,}\b',
-                '<NUM>',
-                'g'
-            )
-        )
-        """
-    )
-
 
 def _create_template_map(connection: DuckDBPyConnection, miner: TemplateMiner) -> None:
     """Mine one Drain template per distinct normalized message.
@@ -494,8 +456,8 @@ def _create_template_map(connection: DuckDBPyConnection, miner: TemplateMiner) -
         CREATE TEMP TABLE event_logs AS
         SELECT
             event_id,
-            md5_number_upper(normalize_log(full_log)) AS log_hi,
-            md5_number_lower(normalize_log(full_log)) AS log_lo,
+            md5_number_upper(preprocess_log(full_log)) AS log_hi,
+            md5_number_lower(preprocess_log(full_log)) AS log_lo,
             strlen(full_log) AS log_length
         FROM classified_events
         WHERE observed_status IN ('no_decoder', 'no_alerting_rule')
@@ -626,7 +588,7 @@ def _read_chunk(connection: DuckDBPyConnection, first_event: int, last_event: in
         """
         SELECT normalized_log, md5_number_upper(normalized_log), md5_number_lower(normalized_log)
         FROM (
-            SELECT normalize_log(full_log) AS normalized_log
+            SELECT preprocess_log(full_log) AS normalized_log
             FROM classified_events
             WHERE event_id BETWEEN $first AND $last
               AND event_id IN (SELECT event_id FROM first_logs WHERE event_id BETWEEN $first AND $last)
@@ -862,7 +824,7 @@ def _create_finding_views(connection: DuckDBPyConnection) -> None:
                 g.*,
                 CASE
                     WHEN g.observed_status = 'below_threshold' THEN concat('rule:', g.rule_key)
-                    ELSE coalesce(t.log_template, normalize_log(g.sample.full_log))
+                    ELSE coalesce(t.log_template, preprocess_log(g.sample.full_log))
                 END AS message_pattern
             FROM finding_groups g
             LEFT JOIN templates t ON t.template_id = g.template_id
