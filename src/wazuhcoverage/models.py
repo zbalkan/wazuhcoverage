@@ -7,10 +7,7 @@ from pathlib import Path
 from typing import Optional
 
 # These dataclasses are part of the public, py.typed API, so their annotations
-# must stay resolvable at runtime on every supported interpreter. Optional[...]
-# is used instead of PEP 604 "X | None" because Python 3.9 cannot evaluate the
-# union operator when a consumer calls typing.get_type_hints(). PEP 585 builtin
-# generics such as tuple[...] are subscriptable on 3.9 and are kept as-is.
+# must stay resolvable at runtime on every supported interpreter.
 # Bucket identifiers, in declared order. They name what the archive record
 # proves, not what analysisd did internally, because an archive event carries
 # no trace of the rule evaluation that produced it.

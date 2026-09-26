@@ -12,8 +12,8 @@ bucket into an answer, at the cost of needing a reachable Wazuh manager.
 
 This module is the only part of wazuhcoverage that talks to anything outside
 the archive file. ``analyze_archive`` stays offline and unchanged; verification
-is a separate call, and ``wazuhtester`` is an optional dependency so the
-package still installs where no manager exists.
+is a separate call. ``wazuhtester`` is installed with wazuhcoverage, while a
+manager connection remains optional at runtime.
 
 Two callers with different needs are served deliberately differently.
 ``verify_findings`` is explicit: asked to replay, it raises rather than quietly
@@ -58,8 +58,7 @@ def _load_wazuhtester() -> Any:
     except ImportError as exc:
         raise RuntimeError(
             "wazuhtester is not installed, so findings cannot be replayed. "
-            "Install it with: pip install 'wazuhcoverage[logtest]' "
-            "(Linux, Python 3.10 or newer, with a running Wazuh manager)"
+            "Reinstall wazuhcoverage to restore its runtime dependencies."
         ) from exc
     except RuntimeError as exc:
         # wazuhtester refuses to import off Linux, where the logtest socket
@@ -71,8 +70,7 @@ def _load_wazuhtester() -> Any:
         where = getattr(wazuhtester, "__file__", None) or "a namespace package with no module file"
         raise RuntimeError(
             f"the wazuhtester importable from {where} is missing {', '.join(missing)}, "
-            "so it is not a usable install. Reinstall it with: "
-            "pip install --force-reinstall 'wazuhcoverage[logtest]'"
+            "so it is not a usable install. Reinstall wazuhcoverage and its runtime dependencies."
         )
 
     return wazuhtester
@@ -81,10 +79,9 @@ def _load_wazuhtester() -> Any:
 def unavailable_reason(socket_path: Optional[str] = None) -> Optional[str]:
     """Return None when replay is possible here, or a short reason why not.
 
-    Three things can stop a replay, and a caller that means to continue without
-    one needs to tell a user which: the library is not installed, the platform
-    cannot run it, or the daemon is not answering. None of them is an error in
-    the archive, so none of them raises.
+    A broken runtime dependency, an unsupported platform, or an unavailable
+    daemon can stop replay. None of them is an error in the archive, so this
+    probe reports the reason instead of raising.
     """
 
     try:

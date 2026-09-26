@@ -11,7 +11,7 @@ When a usable Wazuh manager is available, `wazuhcoverage` can replay representat
 
 ## Installation
 
-Python 3.9 or newer is supported; Python 3.10 or newer is recommended.
+Linux and Python 3.10 or newer are required.
 
 For command-line use:
 
@@ -25,13 +25,9 @@ For use as a Python library:
 python -m pip install wazuhcoverage
 ```
 
-Manager replay is an optional extra. It requires Linux, Python 3.10 or newer, and access to a running Wazuh manager:
+The normal installation also includes `wazuhtester` for replay through a local Wazuh manager when its `wazuh-logtest` socket is available.
 
-```bash
-pipx install "wazuhcoverage[logtest]"
-```
-
-The base package installs DuckDB for archive analysis and drain3 for finding grouping. Dependency constraints and their rationale are documented in [design notes](docs/DESIGN.md#dependency-constraints).
+The package installs DuckDB for archive analysis and drain3 for finding grouping. Dependency constraints and their rationale are documented in [design notes](docs/DESIGN.md#dependency-constraints).
 
 ## Quick start
 
@@ -89,7 +85,7 @@ The sample is retained for validation and replay rather than reconstructed from 
 
 ## Manager replay
 
-If the `logtest` extra is installed and the manager socket is usable, the CLI automatically replays representative findings. This can distinguish several states that the archive alone cannot safely separate, including genuinely uncovered events and events matched by a level-0 rule.
+If the local manager socket is usable, the CLI automatically replays representative findings. This can distinguish several states that the archive alone cannot safely separate, including genuinely uncovered events and events matched by a level-0 rule.
 
 Replay answers for the manager being queried now, not necessarily the manager configuration that originally wrote the archive. It also cannot reproduce every stateful rule from one representative event. See [CAVEATS.md](docs/CAVEATS.md) for the interpretation limits and the Wazuh references behind them.
 

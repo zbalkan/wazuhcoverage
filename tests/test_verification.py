@@ -252,7 +252,7 @@ def test_a_negative_threshold_is_rejected() -> None:
         verify_findings(_analysis(_finding("k")), alert_threshold=-1)
 
 
-def test_a_missing_library_names_the_extra(monkeypatch: MonkeyPatch) -> None:
+def test_a_missing_runtime_dependency_names_reinstall(monkeypatch: MonkeyPatch) -> None:
     import builtins
 
     real_import = builtins.__import__
@@ -264,7 +264,7 @@ def test_a_missing_library_names_the_extra(monkeypatch: MonkeyPatch) -> None:
 
     monkeypatch.setattr(builtins, "__import__", refuse)
 
-    with pytest.raises(RuntimeError, match=r"wazuhcoverage\[logtest\]"):
+    with pytest.raises(RuntimeError, match="Reinstall wazuhcoverage"):
         verify_findings(_analysis(_finding("k")))
 
 

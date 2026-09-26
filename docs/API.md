@@ -73,7 +73,7 @@ The primary metrics are malformed rate, decoder failure rate, uncovered rate, be
 
 ## Verifying findings
 
-`verify_findings()` is the library side of what the CLI does automatically. It is a separate call rather than an argument to `analyze_archive()`, so analysis stays offline and pure: nothing in `analyze_archive()` opens a socket, and a caller that never imports this function never needs the optional dependency. Replay interpretation limits are documented in [CAVEATS.md](CAVEATS.md).
+`verify_findings()` is the library side of what the CLI does automatically. It is a separate call rather than an argument to `analyze_archive()`, so analysis stays offline and pure: nothing in `analyze_archive()` opens a socket. Replay interpretation limits are documented in [CAVEATS.md](CAVEATS.md).
 
 ```python
 from wazuhcoverage import analyze_archive, verify_findings
@@ -87,7 +87,7 @@ for finding in analysis.findings:
         print(finding.event_count, finding.sample_log)
 ```
 
-`verify_findings(analysis, *, alert_threshold=3, statuses=("no_decoder", "no_alerting_rule"), log_format="syslog", socket_path=None)` replays one sample per selected finding and returns a `Verification` for each, in findings order. It raises `RuntimeError` when `wazuhtester` is missing or the socket refuses connections, and `ValueError` for a negative threshold. A failure on one sample is a result, not an exception: that finding comes back `unverified` with the error text and the rest still run.
+`verify_findings(analysis, *, alert_threshold=3, statuses=("no_decoder", "no_alerting_rule"), log_format="syslog", socket_path=None)` replays one sample per selected finding and returns a `Verification` for each, in findings order. It raises `RuntimeError` when the replay integration is unusable or the socket refuses connections, and `ValueError` for a negative threshold. A failure on one sample is a result, not an exception: that finding comes back `unverified` with the error text and the rest still run.
 
 Widen `statuses` to replay buckets the archive already resolved — useful for auditing whether the manager still behaves as the archive says, at the cost of a round trip per finding.
 

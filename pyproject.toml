@@ -11,7 +11,7 @@ description = "Analyze coverage in Wazuh JSON archives using DuckDB"
 readme = "README.md"
 license = "GPL-2.0-only"
 license-files = ["LICENSE"]
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 authors = [
   { name = "Zafer Balkan", email = "zafer@zaferbalkan.com" },
 ]
@@ -22,9 +22,8 @@ classifiers = [
   "Intended Audience :: Developers",
   "Intended Audience :: Information Technology",
   "Intended Audience :: System Administrators",
-  "Operating System :: OS Independent",
+  "Operating System :: POSIX :: Linux",
   "Programming Language :: Python :: 3 :: Only",
-  "Programming Language :: Python :: 3.9",
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
@@ -35,27 +34,19 @@ classifiers = [
   "Topic :: Utilities",
 ]
 dependencies = [
-  # DuckDB dropped Python 3.9 in 1.5.0. Resolvers already honour that via
-  # Requires-Python, but the cap is stated explicitly so a 3.9 install can
-  # never silently acquire a DuckDB the package has not been tested against.
-  "duckdb>=1.3,<2; python_version >= '3.10'",
-  "duckdb>=1.3,<1.5; python_version < '3.10'",
+  "duckdb>=1.3,<2",
   # Drain template mining is the grouping engine, not an option, so drain3 is
   # a runtime dependency. It is pure Python and sets no interpreter floor, but
   # it does pin its own dependencies exactly (jsonpickle and cachetools), which
   # the dependency-conflict CI job exists to catch when that pin starts to
   # collide with something else in a resolved environment.
   "drain3>=0.9.11,<1",
+  # Replay is part of the normal coverage workflow. The project is Linux-only,
+  # matching wazuhtester and the local wazuh-logtest Unix-socket interface.
+  "wazuhtester>=0.1.0rc1,<1",
 ]
 
 [project.optional-dependencies]
-# Replaying finding samples through wazuh-logtest. Optional because it needs
-# what this package otherwise does not: Linux, Python 3.10 or newer, and a
-# running Wazuh manager whose logtest socket this user can reach. Everything
-# else keeps working without it.
-logtest = [
-  "wazuhtester>=0.1.0rc1,<1",
-]
 test = [
   "pytest>=8,<10",
 ]
@@ -92,13 +83,11 @@ testpaths = ["tests"]
 addopts = "-q --import-mode=importlib"
 
 [tool.ruff]
-target-version = "py39"
+target-version = "py310"
 line-length = 120
 
+
 [tool.ruff.lint]
-# UP007/UP045 would rewrite the public annotations back to PEP 604 unions.
-# That syntax is only safe on 3.9 while the annotation stays an unevaluated
-# string, and these models are part of a py.typed API whose annotations
-# consumers resolve with typing.get_type_hints() -- which evaluates them and
-# raises TypeError on 3.9. Drop this ignore when the floor moves to 3.10.
-ignore = ["UP007", "UP045"]
+# Keep the existing annotation/import style; the Linux-only packaging change
+# does not require a repository-wide typing modernization.
+ignore = ["UP007", "UP035", "UP045"]

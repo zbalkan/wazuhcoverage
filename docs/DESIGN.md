@@ -16,11 +16,11 @@ When no replay is possible the report prints a note beside the findings, because
 
 The analysis API accepts an explicit threshold and remains independent of manager configuration. The CLI adds local policy on top: it reads `/var/ossec/etc/ossec.conf` once per run and uses `<alerts><log_alert_level>` when present. If the file is absent, unreadable, malformed, or has no configured value, the CLI falls back to Wazuh's default threshold of `3` and makes that assumption visible in the report.
 
-Threshold discovery is independent of replay availability. A manager can have a readable configuration even when the optional `wazuhtester` integration is not installed, and classification should still use the correct local threshold. The same resolved value is passed to both `analyze_archive()` and `verify_findings()` so the observed and effective states cannot disagree merely because they used different thresholds.
+Threshold discovery is independent of replay availability. A manager can have a readable configuration even when its logtest socket is unavailable, and classification should still use the correct local threshold. The same resolved value is passed to both `analyze_archive()` and `verify_findings()` so the observed and effective states cannot disagree merely because they used different thresholds.
 
 ## Verification through logtest
 
-Verification lives in `wazuhcoverage.verification` and nowhere else. `analyze_archive()` opens no socket and gains no parameter for one, so the analysis path stays offline, deterministic, and installable on a laptop; `verify_findings()` is a separate call whose optional dependency a caller that never invokes it never needs.
+Verification lives in `wazuhcoverage.verification` and nowhere else. `analyze_archive()` opens no socket and gains no parameter for one, so the analysis path stays offline and deterministic; `verify_findings()` is a separate call that uses the installed `wazuhtester` runtime dependency.
 
 ### One replay per finding
 
@@ -165,8 +165,4 @@ The constraint applies only in a shared environment, and only when that environm
 
 Adding a dependency is therefore the thing to be careful about, and `tools/check_dependency_pins.py` exists to enforce that rather than to describe today's tree. It walks the installed graph and fails when an exact pin appears or disappears; CI runs it on every supported interpreter alongside `pip check` and a from-scratch resolution.
 
-`wazuhtester` is an optional extra rather than a dependency, because it requires strictly more than this package does: Linux, Python 3.10 or newer, and a reachable Wazuh manager. Declaring it as a dependency would drop the 3.9 floor, the Windows and macOS support, and the ability to analyze an archive on a laptop, all to serve optional manager replay. The test suite stubs it for the same reason, so CI exercises the mapping logic on every supported interpreter without installing a package half of them cannot have.
-
-DuckDB dropped Python 3.9 in 1.5.0, so the dependency is capped at `duckdb<1.5` on 3.9 through an explicit environment marker. The cap is stated in `pyproject.toml` even though resolvers already honour `Requires-Python`, so a 3.9 install can never silently acquire a DuckDB the package has not been tested against.
-
-Because 3.9 cannot evaluate PEP 604 `X | None` annotations at runtime, the public models are annotated with `typing.Optional` and `typing.Union`. This keeps `typing.get_type_hints()` working on every supported interpreter, so consumers that introspect annotations at runtime behave identically across the range. The `UP007` and `UP045` ruff rules are disabled for that reason and should be re-enabled when the floor moves to 3.10.
+`wazuhtester` is a normal runtime dependency because replay is part of the intended coverage workflow rather than an optional enhancement. That makes the project Linux-only and sets the Python floor to 3.10, matching `wazuhtester` and its local Unix-socket integration with `wazuh-logtest`. A missing or unreachable manager does not prevent archive analysis; it only makes replay unavailable for that run.
