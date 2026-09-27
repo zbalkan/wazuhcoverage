@@ -8,6 +8,7 @@ assume, and all the logic under test is the mapping on this side of the call.
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Dict, List  # noqa: UP035
 
 import pytest
 from pytest import MonkeyPatch
@@ -63,7 +64,7 @@ class _FakeTester:
     def __init__(self, replies, available: bool = True) -> None:
         self._replies = replies
         self._available = available
-        self.calls: list[dict] = []
+        self.calls: List[Dict] = []  # noqa: UP006
 
     def is_logtest_available(self, socket_path=None) -> bool:
         return self._available
@@ -73,7 +74,7 @@ class _FakeTester:
 
     def send_log(self, log, location="stdin", log_format="syslog", socket_path=None):
         self.calls.append({"log": log, "location": location, "log_format": log_format, "socket": socket_path})
-        reply = self._replies[len(self.calls) - 1] if isinstance(self._replies, list) else self._replies
+        reply = self._replies[len(self.calls) - 1] if isinstance(self._replies, List) else self._replies  # noqa: UP006
         if isinstance(reply, Exception):
             raise reply
         return reply

@@ -11,7 +11,7 @@ import tempfile
 from collections.abc import Generator, Iterable, Iterator
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, BinaryIO
+from typing import TYPE_CHECKING, Any, BinaryIO, List, Tuple  # noqa: UP035
 
 from wazuhcoverage.models import STATUSES, ArchiveAnalysis, Finding, LogTypeCount, StatusCount
 from wazuhcoverage.preprocessing import install_preprocessor
@@ -530,7 +530,7 @@ def _mine(connection: DuckDBPyConnection, miner: TemplateMiner, work: str) -> in
     return mined
 
 
-def _sorted_messages(connection: DuckDBPyConnection, work: str, stack: ExitStack) -> Iterable[tuple[str, int, int]]:
+def _sorted_messages(connection: DuckDBPyConnection, work: str, stack: ExitStack) -> Iterable[Tuple[str, int, int]]:  # noqa: UP006
     """Yield every distinct message once, as ``(text, hi, lo)``, in sorted order.
 
     The messages are read in chunks of consecutive events holding at most
@@ -578,7 +578,7 @@ def _sorted_messages(connection: DuckDBPyConnection, work: str, stack: ExitStack
     return heapq.merge(*runs)
 
 
-def _read_chunk(connection: DuckDBPyConnection, first_event: int, last_event: int) -> list[tuple[str, int, int]]:
+def _read_chunk(connection: DuckDBPyConnection, first_event: int, last_event: int) -> List[Tuple[str, int, int]]:  # noqa: UP006
     # A semi-join, with the digest recomputed from the text it selects, so no
     # join has to carry the log text. The digest travels as its two 64-bit
     # halves: handing DuckDB's 128-bit integer to Python, or casting it to
@@ -605,7 +605,7 @@ def _read_chunk(connection: DuckDBPyConnection, first_event: int, last_event: in
 _RUN_RECORD = struct.Struct("<IQQ")
 
 
-def _write_run(stream: BinaryIO, run: list[tuple[str, int, int]]) -> None:
+def _write_run(stream: BinaryIO, run: List[Tuple[str, int, int]]) -> None:  # noqa: UP006
     pack = _RUN_RECORD.pack
     for normalized_log, log_hi, log_lo in run:
         text = normalized_log.encode("utf-8")
@@ -613,7 +613,7 @@ def _write_run(stream: BinaryIO, run: list[tuple[str, int, int]]) -> None:
         stream.write(text)
 
 
-def _read_run(stream: BinaryIO) -> Iterator[tuple[str, int, int]]:
+def _read_run(stream: BinaryIO) -> Iterator[Tuple[str, int, int]]:  # noqa: UP006
     unpack = _RUN_RECORD.unpack
     size = _RUN_RECORD.size
     while True:

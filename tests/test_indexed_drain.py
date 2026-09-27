@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import random
+from typing import List  # noqa: UP035
 
 from drain3.drain import Drain  # type: ignore
 from pytest import MonkeyPatch
@@ -98,7 +99,7 @@ def test_index_avoids_pairwise_distance_scans_on_unique_messages(monkeypatch: Mo
 
 
 def test_empty_candidate_set_does_not_scan_the_prefix_leaf() -> None:
-    class NoIterationList(list):
+    class NoIterationList(List):  # noqa: UP006
         def __iter__(self):
             raise AssertionError("candidate filtering scanned the full Drain leaf")
 

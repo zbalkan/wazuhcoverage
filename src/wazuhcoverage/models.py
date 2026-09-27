@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Tuple  # noqa: UP035
 
 # These dataclasses are part of the public, py.typed API, so their annotations
 # must stay resolvable at runtime on every supported interpreter. Python 3.9+
@@ -118,7 +119,7 @@ class Verification:
     rule_id: str | None
     rule_level: int | None
     rule_description: str | None
-    rule_groups: tuple[str, ...]
+    rule_groups: Tuple[str, ...]  # noqa: UP006
     # Why the state is "unverified"; None whenever it is not.
     error: str | None
 
@@ -131,6 +132,6 @@ class ArchiveAnalysis:
     # total_events and from every bucket, so coverage percentages stay exact;
     # this field is what makes the loss visible rather than silent.
     malformed_lines: int
-    status_counts: tuple[StatusCount, ...]
-    log_type_counts: tuple[LogTypeCount, ...]
-    findings: tuple[Finding, ...]
+    status_counts: Tuple[StatusCount, ...]  # noqa: UP006
+    log_type_counts: Tuple[LogTypeCount, ...]  # noqa: UP006
+    findings: Tuple[Finding, ...]  # noqa: UP006

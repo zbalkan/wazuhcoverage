@@ -4,6 +4,7 @@ import signal
 import sys
 from dataclasses import replace
 from pathlib import Path
+from typing import Dict, List  # noqa: UP035
 
 import pytest
 
@@ -123,7 +124,7 @@ def test_targets_are_optional_so_a_pipe_can_supply_one() -> None:
 
 def test_a_piped_archive_is_analyzed_without_a_target(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys) -> None:
     rows = b'{"full_log": "piped", "decoder": {"name": "sshd"}}\n'
-    scanned: list[Path] = []
+    scanned: List[Path] = []  # noqa: UP006
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(cli.sys, "stdin", _PipedStdin(rows))
@@ -178,7 +179,7 @@ def test_a_gzipped_pipe_is_spooled_under_a_gz_name(monkeypatch: pytest.MonkeyPat
     # number has to reach the spooled file's name or a compressed pipe is read
     # as binary garbage.
     payload = gzip.compress(b'{"full_log": "piped"}\n')
-    suffixes: list[str] = []
+    suffixes: List[str] = []  # noqa: UP006
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(cli.sys, "stdin", _PipedStdin(payload))
@@ -198,7 +199,7 @@ def test_a_plain_pipe_is_spooled_byte_for_byte(monkeypatch: pytest.MonkeyPatch, 
     # The first bytes are consumed to sniff for gzip and must be written back,
     # or every uncompressed archive loses its first two characters.
     rows = b'{"full_log": "first"}\n{"full_log": "second"}\n'
-    spooled: list[bytes] = []
+    spooled: List[bytes] = []  # noqa: UP006
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(cli.sys, "stdin", _PipedStdin(rows))
@@ -226,7 +227,7 @@ def test_a_terminal_without_a_target_asks_for_one(monkeypatch: pytest.MonkeyPatc
 def test_a_failing_stream_still_leaves_no_temporary_file(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys
 ) -> None:
-    seen: list[Path] = []
+    seen: List[Path] = []  # noqa: UP006
 
     def explode(path, **_kwargs):
         seen.append(Path(path))
@@ -261,7 +262,7 @@ def test_no_run_writes_persistent_state(monkeypatch: pytest.MonkeyPatch, tmp_pat
 def test_the_same_archive_is_processed_every_run(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys) -> None:
     archive = tmp_path / "archive.json.gz"
     archive.touch()
-    analyzed: list[Path] = []
+    analyzed: List[Path] = []  # noqa: UP006
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(cli, "resolve_targets", lambda _targets: [archive])
@@ -306,7 +307,7 @@ def test_cli_exposes_no_engine_switch() -> None:
 def test_cli_forwards_parsing_mode_to_the_analysis(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys) -> None:
     archive = tmp_path / "archive.json.gz"
     archive.touch()
-    received: list[dict] = []
+    received: List[Dict] = []  # noqa: UP006
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(cli, "resolve_targets", lambda _targets: [archive])
@@ -461,7 +462,7 @@ def test_sigterm_exits_cleanly_only_while_a_run_is_active(
     # handler that exits through them, and puts the default back afterwards.
     archive = tmp_path / "archive.json.gz"
     archive.touch()
-    during: list = []
+    during: List = []  # noqa: UP006
 
     monkeypatch.setattr(cli, "resolve_targets", lambda _targets: [archive])
 
@@ -482,7 +483,7 @@ def test_sigterm_exits_cleanly_only_while_a_run_is_active(
 def test_a_host_sigterm_handler_is_left_alone(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys) -> None:
     archive = tmp_path / "archive.json.gz"
     archive.touch()
-    during: list = []
+    during: List = []  # noqa: UP006
 
     def host_handler(_signum, _frame) -> None:
         return None
@@ -514,9 +515,9 @@ def test_a_sigterm_inside_a_query_stops_the_run(monkeypatch: pytest.MonkeyPatch,
     archives = [tmp_path / "a.json.gz", tmp_path / "b.json.gz"]
     for archive in archives:
         archive.touch()
-    analyzed: list[Path] = []
+    analyzed: List[Path] = []  # noqa: UP006
 
-    def interrupted(path, **_kwargs):
+    def interrupted(path, **_kwargs) -> None:
         analyzed.append(path)
         try:
             cli._raise_system_exit(signal.SIGTERM, None)
@@ -573,7 +574,7 @@ def test_a_reachable_daemon_is_used_without_being_asked(
 ) -> None:
     archive = tmp_path / "archive.json.gz"
     archive.touch()
-    received: list[dict] = []
+    received: List[Dict] = []  # noqa: UP006
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(cli, "resolve_targets", lambda _targets: [archive])
@@ -626,7 +627,7 @@ def test_the_daemon_is_probed_once_not_per_archive(monkeypatch: pytest.MonkeyPat
     archives = [tmp_path / f"{name}.json.gz" for name in ("a", "b", "c")]
     for archive in archives:
         archive.touch()
-    probes: list[int] = []
+    probes: List[int] = []  # noqa: UP006
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(cli, "resolve_targets", lambda _targets: archives)
@@ -650,7 +651,7 @@ def test_the_probe_happens_before_the_first_archive_is_read(
     # A warning printed halfway down a report is a warning nobody reads.
     archive = tmp_path / "archive.json.gz"
     archive.touch()
-    order: list[str] = []
+    order: List[str] = []  # noqa: UP006
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(cli, "resolve_targets", lambda _targets: [archive])
@@ -676,7 +677,7 @@ def test_the_probe_happens_before_the_first_archive_is_read(
 def test_offline_run_assumes_wazuh_default_threshold(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys) -> None:
     archive = tmp_path / "archive.json.gz"
     archive.touch()
-    analyzed: list[dict] = []
+    analyzed: List[Dict] = []  # noqa: UP006
 
     monkeypatch.setattr(cli, "resolve_targets", lambda _targets: [archive])
     monkeypatch.setattr(cli, "unavailable_reason", lambda: "no manager")
@@ -707,8 +708,8 @@ def test_online_run_reads_threshold_once_and_reports_source(
     for archive in archives:
         archive.touch()
 
-    reads: list[int] = []
-    analyzed: list[dict] = []
+    reads: List[int] = []  # noqa: UP006
+    analyzed: List[Dict] = []  # noqa: UP006
 
     monkeypatch.setattr(cli, "resolve_targets", lambda _targets: archives)
     monkeypatch.setattr(cli, "unavailable_reason", lambda: None)

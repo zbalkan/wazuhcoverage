@@ -6,13 +6,13 @@ import duckdb
 from wazuhcoverage import analyze_archive
 
 
-def _write_jsonl(path: Path, rows: list[dict]) -> None:
+def _write_jsonl(path: Path, rows: List[Dict]) -> None:
     with path.open("w", encoding="utf-8") as stream:
         for row in rows:
             stream.write(json.dumps(row) + "\n")
 
 
-def _undecoded(full_log: str, agent_id: str = "001") -> dict:
+def _undecoded(full_log: str, agent_id: str = "001") -> Dict:
     return {
         "timestamp": "2026-09-18T10:00:00+00:00",
         "agent": {"id": agent_id, "name": "host"},
@@ -22,7 +22,7 @@ def _undecoded(full_log: str, agent_id: str = "001") -> dict:
     }
 
 
-def _ssh_failures() -> list[dict]:
+def _ssh_failures() -> List[Dict]:
     # The normalizer masks syntactic variance only, so these five lines are five
     # distinct strings when they reach the miner: usernames, addresses and short
     # ports cannot be masked by regex without enumerating them.

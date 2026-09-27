@@ -42,7 +42,7 @@ def test_spill_directory_is_private_and_removed(tmp_path: Path, monkeypatch: pyt
         assert spill.is_dir()
 
     assert not spill.exists()
-    assert list(system_tmp.iterdir()) == []
+    assert List(system_tmp.iterdir()) == []
 
 
 def test_memory_and_threads_are_duckdb_defaults() -> None:
@@ -70,8 +70,8 @@ def test_a_run_leaves_the_working_directory_untouched(tmp_path: Path, monkeypatc
     result = analyze_archive(archive)
 
     assert result.total_events == 200
-    assert list(workdir.iterdir()) == []
-    assert list(system_tmp.iterdir()) == []
+    assert List(workdir.iterdir()) == []
+    assert List(system_tmp.iterdir()) == []
 
 
 def test_temporary_files_do_not_outlive_a_failed_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

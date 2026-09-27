@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal, TypeAlias
+from typing import Dict, Literal, Tuple, TypeAlias  # noqa: UP035
 
 from wazuhcoverage.models import PROCESSED_STATUS, Finding, Verification
 
@@ -21,20 +21,20 @@ FindingGroup: TypeAlias = Literal[
 ]
 
 
-RESOLVED_OUTCOMES: tuple[ResolvedOutcome, ...] = (
+RESOLVED_OUTCOMES: Tuple[ResolvedOutcome, ...] = (  # noqa: UP006
     "Processed",
     "Suppressed",
     "Dropped",
     "Unresolved",
 )
 
-FINDING_GROUPS: tuple[FindingGroup, ...] = (
+FINDING_GROUPS: Tuple[FindingGroup, ...] = (  # noqa: UP006
     "Dropped",
     "Processed",
     "Unresolved",
 )
 
-_EFFECTIVE_OUTCOME: dict[str, ResolvedOutcome] = {
+_EFFECTIVE_OUTCOME: Dict[str, ResolvedOutcome] = {  # noqa: UP006
     "at_or_above_threshold": "Processed",
     "suppressed": "Suppressed",
     "below_threshold": "Suppressed",
@@ -44,7 +44,7 @@ _EFFECTIVE_OUTCOME: dict[str, ResolvedOutcome] = {
     "unverified": "Unresolved",
 }
 
-_FINDING_GROUP: dict[str, FindingGroup] = {
+_FINDING_GROUP: Dict[str, FindingGroup] = {  # noqa: UP006
     "no_decoder": "Dropped",
     "uncovered": "Dropped",
     "at_or_above_threshold": "Processed",
@@ -80,7 +80,7 @@ def finding_group(status: str) -> FindingGroup:
     return _FINDING_GROUP[status]
 
 
-def outcome_counts(statuses: dict[str, int], *, resolved: bool) -> dict[str, int]:
+def outcome_counts(statuses: Dict[str, int], *, resolved: bool) -> Dict[str, int]:  # noqa: UP006
     """Aggregate statuses using archive-only or replay-resolved semantics."""
 
     if not resolved:
@@ -90,7 +90,7 @@ def outcome_counts(statuses: dict[str, int], *, resolved: bool) -> dict[str, int
             "Dropped": sum(statuses.values()) - processed,
         }
 
-    counts: dict[str, int] = dict.fromkeys(RESOLVED_OUTCOMES, 0)
+    counts: Dict[str, int] = dict.fromkeys(RESOLVED_OUTCOMES, 0)  # noqa: UP006
     for status, count in statuses.items():
         counts[effective_outcome(status)] += count
 

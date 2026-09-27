@@ -47,7 +47,7 @@ def _requirement_name(requirement: str) -> str | None:
     return _canonical(match.group(1)) if match else None
 
 
-def _requirements(distribution: str) -> list[str]:
+def _requirements(distribution: str) -> List[str]:
     try:
         requires = metadata.distribution(distribution).requires or []
     except metadata.PackageNotFoundError:
@@ -59,10 +59,10 @@ def _requirements(distribution: str) -> list[str]:
     return [requirement for requirement in requires if "extra ==" not in requirement]
 
 
-def collect_pins() -> dict[tuple[str, str], str]:
+def collect_pins() -> Dict[Tuple[str, str], str]:
     """Return {(requiring distribution, required distribution): requirement}."""
 
-    pins: dict[tuple[str, str], str] = {}
+    pins: Dict[Tuple[str, str], str] = {}
     seen = {_canonical(ROOT)}
     queue = [_canonical(ROOT)]
 

@@ -7,7 +7,7 @@ import re
 from collections.abc import Sequence
 from datetime import datetime
 from html import escape
-from typing import TypedDict
+from typing import Dict, List, Tuple, TypedDict  # noqa: UP035
 
 from wazuhcoverage.metrics import MetricSnapshot, MetricValue, calculate_metrics, resolve_effective_counts
 from wazuhcoverage.models import ArchiveAnalysis, Finding, Verification
@@ -567,7 +567,7 @@ def _render_metric_card(label: str, metric: MetricValue) -> str:
     )
 
 
-def _render_outcome_table(outcomes: dict[str, int], total: int) -> str:
+def _render_outcome_table(outcomes: Dict[str, int], total: int) -> str:  # noqa: UP006
     rows = []
     for name, count in outcomes.items():
         rows.append(
@@ -614,7 +614,7 @@ def _render_log_type_table(snapshot: MetricSnapshot) -> str:
 
 
 def _render_log_type_outcome_table(
-    log_types: dict[str | None, dict[str, int]],
+    log_types: Dict[str | None, Dict[str, int]],  # noqa: UP006
     *,
     resolved: bool,
 ) -> str:
@@ -645,7 +645,7 @@ def _render_findings(
     verifications: Sequence[Verification],
 ) -> str:
     by_key = {item.finding_key: item for item in verifications}
-    grouped: dict[str, list[tuple[Finding, Verification | None]]] = {group: [] for group in FINDING_GROUPS}
+    grouped: Dict[str, List[Tuple[Finding, Verification | None]]] = {group: [] for group in FINDING_GROUPS}  # noqa: UP006
 
     for finding in analysis.findings:
         verification = by_key.get(finding.finding_key)
@@ -744,7 +744,7 @@ class ContributorRow(TypedDict):
 def _contributors(
     snapshot: MetricSnapshot,
     metric: str,
-) -> list[ContributorRow]:
+) -> List[ContributorRow]:  # noqa: UP006
     attributes = {
         "decoder_failure": ("decoder_failure_rate", "decoder_failure_contribution"),
         "uncovered": ("uncovered_rate", "uncovered_contribution"),
@@ -752,7 +752,7 @@ def _contributors(
     }
 
     local_name, contribution_name = attributes[metric]
-    rows: list[ContributorRow] = []
+    rows: List[ContributorRow] = []  # noqa: UP006
 
     for item in snapshot.log_types:
         local = getattr(item, local_name)
@@ -796,11 +796,11 @@ class ChartLogTypeRow(TypedDict):
 
 
 def _chart_log_types(
-    log_types: dict[str | None, dict[str, int]],
+    log_types: Dict[str | None, Dict[str, int]],  # noqa: UP006
     *,
     resolved: bool,
-) -> list[ChartLogTypeRow]:
-    rows: list[ChartLogTypeRow] = []
+) -> List[ChartLogTypeRow]:  # noqa: UP006
+    rows: List[ChartLogTypeRow] = []  # noqa: UP006
 
     for log_type, statuses in log_types.items():
         outcomes = outcome_counts(statuses, resolved=resolved)

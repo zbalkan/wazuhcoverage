@@ -28,7 +28,7 @@ _PCRE2_PLACEHOLDERS = {
 _PCRE2_SPECIALS = frozenset(r"\.^$|?*+()[]{}")
 
 
-def suggest_wazuh_regex(message_pattern: str) -> tuple[str, str]:
+def suggest_wazuh_regex(message_pattern: str) -> Tuple[str, str]:
     """Return a Wazuh regex type and best-effort expression for a mined pattern.
 
     Literal text is preserved. OSRegex is used for ordinary Drain wildcards.

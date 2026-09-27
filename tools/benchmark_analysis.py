@@ -30,7 +30,7 @@ from pathlib import Path
 from wazuhcoverage import analyze_archive
 
 
-def _realistic_rows(event_count: int) -> Iterator[dict]:
+def _realistic_rows(event_count: int) -> Iterator[Dict]:
     vocabulary = max(1, (event_count * 4) // 5)
     for index in range(event_count):
         variant = index % vocabulary
@@ -60,7 +60,7 @@ def _alphabetic_id(index: int) -> str:
             return label
 
 
-def _unique_rows(event_count: int) -> Iterator[dict]:
+def _unique_rows(event_count: int) -> Iterator[Dict]:
     for index in range(event_count):
         # Decimal IDs of five or more digits would intentionally collapse to
         # ``<NUM>``, so use an alphabetic identifier instead.
@@ -73,13 +73,13 @@ def _unique_rows(event_count: int) -> Iterator[dict]:
         }
 
 
-CASES: dict[str, Callable[[int], Iterator[dict]]] = {
+CASES: Dict[str, Callable[[int], Iterator[Dict]]] = {
     "realistic": _realistic_rows,
     "unique": _unique_rows,
 }
 
 
-def _run(case: str, event_count: int, directory: Path) -> dict:
+def _run(case: str, event_count: int, directory: Path) -> Dict:
     archive = directory / f"{case}.json"
     with archive.open("w", encoding="utf-8") as stream:
         for row in CASES[case](event_count):
@@ -116,7 +116,7 @@ def main() -> int:
     if args.events < 1:
         parser.error("--events must be positive")
 
-    selected = list(CASES) if args.case == "both" else [args.case]
+    selected = List(CASES) if args.case == "both" else [args.case]
     with tempfile.TemporaryDirectory(prefix="wazuhcoverage-benchmark-") as temporary_directory:
         directory = Path(temporary_directory)
         for case in selected:

@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 from collections import defaultdict
 from collections.abc import Sequence
+from typing import Dict, List, Tuple  # noqa: UP035
 
 from drain3.drain import Drain, LogClusterCache, Node  # type: ignore
 
@@ -27,7 +28,7 @@ class IndexedDrain(Drain):
 
     A template must have at least ``ceil(sim_th * token_count)`` exact token
     matches to pass Drain's similarity check during mining. It must therefore
-    occur in the posting list for at least one of any ``n - k + 1`` positions
+    occur in the posting List for at least one of any ``n - k + 1`` positions
     in the incoming message. Choosing the rarest such positions sharply
     reduces the candidate set while preserving Drain's original cluster order
     and, consequently, its tie-breaking semantics.
@@ -35,10 +36,10 @@ class IndexedDrain(Drain):
 
     def __init__(self, *args: object, **kwargs: object) -> None:
         super().__init__(*args, **kwargs)  # type: ignore
-        self._postings: defaultdict[tuple[int, str], set[int]] = defaultdict(set)
-        self._indexed_tokens: dict[int, tuple[str, ...]] = {}
-        self._cluster_leaf: dict[int, Node] = {}
-        self._leaf_by_cluster_list: dict[int, Node] = {}
+        self._postings: defaultdict[Tuple[int, str], set[int]] = defaultdict(set)  # noqa: UP006
+        self._indexed_tokens: Dict[int, Tuple[str, ...]] = {}  # noqa: UP006
+        self._cluster_leaf: Dict[int, Node] = {}  # noqa: UP006
+        self._leaf_by_cluster_list: Dict[int, Node] = {}  # noqa: UP006
         self._stale_per_leaf: defaultdict[int, int] = defaultdict(int)
         if self.max_clusters is not None:
             self.id_to_cluster = _IndexedLogClusterCache(self.max_clusters, self)
@@ -51,12 +52,12 @@ class IndexedDrain(Drain):
             leaf_key = id(leaf)
             self._stale_per_leaf[leaf_key] += 1
             if self._stale_per_leaf[leaf_key] * 2 >= len(leaf.cluster_ids):
-                # Mutate in place: fast_match uses the list identity to recover
+                # Mutate in place: fast_match uses the List identity to recover
                 # its leaf without scanning every cluster ID.
                 leaf.cluster_ids[:] = [candidate for candidate in leaf.cluster_ids if candidate in self.id_to_cluster]
                 self._stale_per_leaf[leaf_key] = 0
 
-    def _remove_postings(self, cluster_id: int, tokens: tuple[str, ...] | None) -> None:
+    def _remove_postings(self, cluster_id: int, tokens: Tuple[str, ...] | None) -> None:  # noqa: UP006
         if tokens is None:
             return
         for position, token in enumerate(tokens):
@@ -66,7 +67,7 @@ class IndexedDrain(Drain):
                 if not posting:
                     del self._postings[(position, token)]
 
-    def _replace_indexed_template(self, cluster_id: int, tokens: tuple[str, ...]) -> None:
+    def _replace_indexed_template(self, cluster_id: int, tokens: Tuple[str, ...]) -> None:  # noqa: UP006
         self._remove_postings(cluster_id, self._indexed_tokens.get(cluster_id))
         self._indexed_tokens[cluster_id] = tokens
         for position, token in enumerate(tokens):
@@ -112,7 +113,7 @@ class IndexedDrain(Drain):
                 cur_node = children[self.param_str]
             current_depth += 1
 
-    def fast_match(self, cluster_ids: Sequence, tokens: list, sim_th: float, include_params: bool):  # type: ignore[no-untyped-def]
+    def fast_match(self, cluster_ids: Sequence, tokens: List, sim_th: float, include_params: bool):  # type: ignore[no-untyped-def]  # noqa: UP006
         # ``match()`` can count wildcard parameters as matches. The positional
         # exact-token bound does not apply in that mode, so retain stock Drain.
         if include_params or not cluster_ids:
@@ -135,7 +136,7 @@ class IndexedDrain(Drain):
             candidate_ids.update(self._postings.get((position, token), ()))
 
         # Cluster IDs increase monotonically, which is also their order in a
-        # Drain leaf. Recovering the leaf by list identity lets us preserve that
+        # Drain leaf. Recovering the leaf by List identity lets us preserve that
         # tie order without scanning a large leaf merely to filter a tiny set.
         leaf = self._leaf_by_cluster_list.get(id(cluster_ids))
         if leaf is None:  # Defensive fallback for a drain3 representation change.

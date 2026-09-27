@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Tuple  # noqa: UP035
 
 from wazuhcoverage import ArchiveAnalysis, Finding, LogTypeCount, StatusCount, Verification  # type: ignore
 from wazuhcoverage.report import render_report
@@ -48,7 +49,7 @@ def _analysis() -> ArchiveAnalysis:
     )
 
 
-def _verifications() -> tuple[Verification, ...]:
+def _verifications() -> Tuple[Verification, ...]:  # noqa: UP006
     return (
         Verification("nd", "no_decoder", "NoDecoder", None, None, None, None, (), None),
         Verification("u", "uncovered", "NoRule", "firewall", None, None, None, (), None),

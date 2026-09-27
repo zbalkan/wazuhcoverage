@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Literal
+from typing import Dict, List, Literal, Tuple  # noqa: UP035
 
 from wazuhcoverage.metrics import MetricSnapshot, MetricValue, calculate_metrics, resolve_effective_counts
 from wazuhcoverage.models import (
@@ -37,7 +37,7 @@ _DROPPED_PERCENT_WIDTH = 12
 # One column per outcome, then the breakdown of the dropped one. The two
 # aggregates come first so a row can be read for coverage alone; the three
 # that follow say why the dropped share was dropped and sum back to it.
-_LOG_TYPE_COLUMNS: tuple[Literal["Processed"], Literal["Dropped"], str, ...] = (  # type: ignore
+_LOG_TYPE_COLUMNS: Tuple[Literal["Processed"], Literal["Dropped"], str, ...] = (  # type: ignore  # noqa: UP006
     _PROCESSED_LABEL,
     _DROPPED_LABEL,
 ) + DROPPED_STATUSES
@@ -46,7 +46,7 @@ _LOG_TYPE_COLUMN_WIDTHS = {column: max(12, len(column) + 2) for column in _LOG_T
 # wazuhcoverage.models.STATUSES for why.
 _AMBIGUOUS_STATUS = "no_alerting_rule"
 _EFFECTIVE_WIDTH = max(24, max(len(state) for state in EFFECTIVE_STATES) + 2)
-_RESOLVED_LOG_WIDTHS: dict[str, int] = {column: max(12, len(column) + 2) for column in RESOLVED_OUTCOMES}
+_RESOLVED_LOG_WIDTHS: Dict[str, int] = {column: max(12, len(column) + 2) for column in RESOLVED_OUTCOMES}  # noqa: UP006
 
 
 def render_report(
@@ -65,7 +65,7 @@ def render_report(
     event is Dropped. Ambiguous or failed replays remain Unresolved.
     """
 
-    lines: list[str] = [f"Archive: {analysis.path}"]
+    lines: List[str] = [f"Archive: {analysis.path}"]  # noqa: UP006
     by_key = {item.finding_key: item for item in verifications}
     if alert_threshold is not None:
         source = f" ({threshold_source})" if threshold_source else ""
@@ -116,7 +116,7 @@ def render_report(
     if not by_key:
         lines.extend(_no_alerting_rule_note(analysis))
 
-    grouped: dict[str, list[tuple[Finding, Verification | None]]] = {group: [] for group in FINDING_GROUPS}
+    grouped: Dict[str, List[Tuple[Finding, Verification | None]]] = {group: [] for group in FINDING_GROUPS}  # noqa: UP006
     for finding in analysis.findings:
         verification = by_key.get(finding.finding_key)
         status = verification.effective_state if verification is not None else finding.observed_status
@@ -135,7 +135,7 @@ def render_report(
     return "\n".join(lines).rstrip() + "\n"
 
 
-def _finding_rows(index: int, finding: Finding, verification: Verification | None) -> list[str]:
+def _finding_rows(index: int, finding: Finding, verification: Verification | None) -> List[str]:  # noqa: UP006
     """Render a finding within its effective outcome group."""
 
     presented = present_finding(finding, verification)
@@ -164,7 +164,7 @@ def _finding_rows(index: int, finding: Finding, verification: Verification | Non
     return rows
 
 
-def _outcome_table(analysis: ArchiveAnalysis) -> list[str]:
+def _outcome_table(analysis: ArchiveAnalysis) -> List[str]:  # noqa: UP006
     """Render the archive as two outcomes, with the dropped one broken out.
 
     Only ``at_or_above_threshold`` reaches an alert, so it is the whole of the
@@ -216,7 +216,7 @@ def _outcome_table(analysis: ArchiveAnalysis) -> list[str]:
     return rows
 
 
-def _resolved_outcome_table(statuses: dict[str, int], total: int) -> list[str]:
+def _resolved_outcome_table(statuses: Dict[str, int], total: int) -> List[str]:  # noqa: UP006
     """Keep whole-archive totals while separating matched suppression from loss."""
 
     outcomes = outcome_counts(statuses, resolved=True)
@@ -249,7 +249,7 @@ def _resolved_outcome_table(statuses: dict[str, int], total: int) -> list[str]:
     return rows
 
 
-def _resolved_log_type_table(log_types: dict[str | None, dict[str, int]], total: int) -> list[str]:
+def _resolved_log_type_table(log_types: Dict[str | None, Dict[str, int]], total: int) -> List[str]:  # noqa: UP006
     """Include every log type, including those without replayed findings."""
 
     rows = [
@@ -274,7 +274,7 @@ def _resolved_log_type_table(log_types: dict[str | None, dict[str, int]], total:
     return rows
 
 
-def _resolved_log_type_row(log_type: str, count: str, percentage: str, counts: dict[str, str]) -> str:
+def _resolved_log_type_row(log_type: str, count: str, percentage: str, counts: Dict[str, str]) -> str:  # noqa: UP006
     cells = [
         f"{log_type:<{_LOG_TYPE_WIDTH}}",
         f"{count:>{_COUNT_WIDTH}}",
@@ -284,7 +284,7 @@ def _resolved_log_type_row(log_type: str, count: str, percentage: str, counts: d
     return "".join(cells).rstrip()
 
 
-def _log_type_cells(status_counts: dict[str, int]) -> dict[str, str]:
+def _log_type_cells(status_counts: Dict[str, int]) -> Dict[str, str]:  # noqa: UP006
     """Lay one log type's buckets out as the outcome columns of its row."""
 
     dropped = sum(status_counts.get(status, 0) for status in DROPPED_STATUSES)
@@ -296,7 +296,7 @@ def _log_type_cells(status_counts: dict[str, int]) -> dict[str, str]:
     return cells
 
 
-def _metrics_table(snapshot: MetricSnapshot) -> list[str]:
+def _metrics_table(snapshot: MetricSnapshot) -> List[str]:  # noqa: UP006
     """Render the five primary metrics with their numerator and denominator."""
 
     rows = [
@@ -313,7 +313,7 @@ def _metrics_table(snapshot: MetricSnapshot) -> list[str]:
     return rows
 
 
-def _metric_contributors(snapshot: MetricSnapshot) -> list[str]:
+def _metric_contributors(snapshot: MetricSnapshot) -> List[str]:  # noqa: UP006
     """Show the largest log-type contributors while preserving local severity."""
 
     groups = (
@@ -321,7 +321,7 @@ def _metric_contributors(snapshot: MetricSnapshot) -> list[str]:
         ("Uncovered", "uncovered_rate", "uncovered_contribution"),
         ("Below threshold", "below_threshold_rate", "below_threshold_contribution"),
     )
-    rows: list[str] = []
+    rows: List[str] = []  # noqa: UP006
 
     for label, local_name, contribution_name in groups:
         candidates = []
@@ -381,7 +381,7 @@ def _ratio_percent(value: float) -> str:
     return _percent(value * 100.0)
 
 
-def _effective_table(analysis: ArchiveAnalysis, by_key: dict[str, Verification]) -> list[str]:
+def _effective_table(analysis: ArchiveAnalysis, by_key: Dict[str, Verification]) -> List[str]:  # noqa: UP006
     """Rank the replayed verdicts by how many events each one accounts for.
 
     Findings are weighted by ``event_count`` rather than counted, because one
@@ -393,8 +393,8 @@ def _effective_table(analysis: ArchiveAnalysis, by_key: dict[str, Verification])
     if not by_key:
         return []
 
-    events: dict[str, int] = {}
-    findings: dict[str, int] = {}
+    events: Dict[str, int] = {}  # noqa: UP006
+    findings: Dict[str, int] = {}  # noqa: UP006
     for finding in analysis.findings:
         verification = by_key.get(finding.finding_key)
         if verification is None:
@@ -432,7 +432,7 @@ def _effective_row(state: str, findings: str, events: str, percentage: str) -> s
     return "".join(cells).rstrip()
 
 
-def _no_alerting_rule_note(analysis: ArchiveAnalysis) -> list[str]:
+def _no_alerting_rule_note(analysis: ArchiveAnalysis) -> List[str]:  # noqa: UP006
     """Return the caveat rows for the ``no_alerting_rule`` bucket, if it is used.
 
     The bucket name is honest but incomplete on its own: the report shows an
@@ -461,10 +461,10 @@ def _no_alerting_rule_note(analysis: ArchiveAnalysis) -> list[str]:
 
 def _summarize_log_types(
     analysis: ArchiveAnalysis,
-) -> list[tuple[str | None, int, dict[str, int]]]:
+) -> List[Tuple[str | None, int, Dict[str, int]]]:  # noqa: UP006
     """Pivot detailed status/log-type counts into one row per log type."""
 
-    by_log_type: dict[str | None, dict[str, int]] = {}
+    by_log_type: Dict[str | None, Dict[str, int]] = {}  # noqa: UP006
     for item in analysis.log_type_counts:
         status_counts = by_log_type.setdefault(item.log_type, {})
         status_counts[item.status] = status_counts.get(item.status, 0) + item.event_count
@@ -488,7 +488,7 @@ def _log_type_row(
     log_type: str,
     count: str,
     percentage: str,
-    column_values: dict[str, str],
+    column_values: Dict[str, str],  # noqa: UP006
 ) -> str:
     """Lay out one log-type summary row without truncating its identifier."""
 

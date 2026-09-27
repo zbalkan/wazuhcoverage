@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Dict, Tuple  # noqa: UP035
 
 from wazuhcoverage.models import ArchiveAnalysis, Verification
 
@@ -47,7 +47,7 @@ class MetricSnapshot:
     uncovered_rate: MetricValue
     below_threshold_rate: MetricValue
     uncertainty_rate: MetricValue
-    log_types: tuple[LogTypeMetrics, ...]
+    log_types: Tuple[LogTypeMetrics, ...]  # noqa: UP006
 
 
 def calculate_metrics(
@@ -115,11 +115,11 @@ def calculate_metrics(
 def resolve_effective_counts(
     analysis: ArchiveAnalysis,
     verifications: Sequence[Verification] = (),
-) -> tuple[dict[str, int], dict[str | None, dict[str, int]]]:
+) -> Tuple[Dict[str, int], Dict[str | None, Dict[str, int]]]:  # noqa: UP006
     """Return whole-archive status and log-type counts after replay replacements."""
 
     statuses = {item.status: item.event_count for item in analysis.status_counts}
-    log_types: dict[str | None, dict[str, int]] = {}
+    log_types: Dict[str | None, Dict[str, int]] = {}  # noqa: UP006
     for item in analysis.log_type_counts:
         counts = log_types.setdefault(item.log_type, {})
         counts[item.status] = counts.get(item.status, 0) + item.event_count
@@ -150,7 +150,7 @@ def resolve_effective_counts(
     return statuses, log_types
 
 
-def metrics_to_dict(snapshot: MetricSnapshot) -> dict[str, Any]:
+def metrics_to_dict(snapshot: MetricSnapshot) -> Dict[str, Any]:  # noqa: UP006
     """Return a JSON-serializable representation with ratios kept as fractions."""
 
     return {
@@ -203,7 +203,7 @@ def _replay_complete(
 
 def _log_type_metrics(
     log_type: str | None,
-    counts: dict[str, int],
+    counts: Dict[str, int],  # noqa: UP006
     *,
     decoder_failures: int,
     uncovered_total: int,
@@ -249,7 +249,7 @@ def _unavailable_metric() -> MetricValue:
     return MetricValue(count=None, denominator=None, ratio=None, available=False)
 
 
-def _metric_dict(metric: MetricValue) -> dict[str, Any]:
+def _metric_dict(metric: MetricValue) -> Dict[str, Any]:  # noqa: UP006
     return {
         "count": metric.count,
         "denominator": metric.denominator,

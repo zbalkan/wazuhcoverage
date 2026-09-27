@@ -97,10 +97,10 @@ def verify_findings(
     analysis: ArchiveAnalysis,
     *,
     alert_threshold: int = DEFAULT_ALERT_THRESHOLD,
-    statuses: tuple[str, ...] = DEFAULT_VERIFIED_STATUSES,
+    statuses: Tuple[str, ...] = DEFAULT_VERIFIED_STATUSES,
     log_format: str = DEFAULT_LOG_FORMAT,
     socket_path: str | None = None,
-) -> tuple[Verification, ...]:
+) -> Tuple[Verification, ...]:
     """Replay each selected finding's sample and report its effective state.
 
     One sample is replayed per finding, which is what grouping is for: an
@@ -126,7 +126,7 @@ def verify_findings(
     if alert_threshold < 0:
         raise ValueError("alert_threshold must be non-negative")
 
-    targets = tuple(
+    targets = Tuple(
         finding for finding in analysis.findings if finding.observed_status in statuses and finding.sample_log
     )
     if not targets:
@@ -138,7 +138,7 @@ def verify_findings(
 
     wazuhtester = _load_wazuhtester()
 
-    return tuple(
+    return Tuple(
         _verify_one(
             wazuhtester,
             finding,
@@ -205,7 +205,7 @@ def _verification(finding: Finding, state: str, response: Any, status: str) -> V
         rule_id=_string_or_none(response.rule_id),
         rule_level=_level(response.rule_level),
         rule_description=_string_or_none(response.rule_description),
-        rule_groups=tuple(sorted(response.rule_groups or ())),
+        rule_groups=Tuple(sorted(response.rule_groups or ())),
         error=None,
     )
 
@@ -225,7 +225,7 @@ def _unverified(
         rule_id=None if response is None else _string_or_none(response.rule_id),
         rule_level=None if response is None else _level(response.rule_level),
         rule_description=None if response is None else _string_or_none(response.rule_description),
-        rule_groups=() if response is None else tuple(sorted(response.rule_groups or ())),
+        rule_groups=() if response is None else Tuple(sorted(response.rule_groups or ())),
         error=error,
     )
 

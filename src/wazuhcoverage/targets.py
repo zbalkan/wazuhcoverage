@@ -6,7 +6,7 @@ from glob import glob
 from pathlib import Path
 
 
-def resolve_targets(targets: list[str]) -> list[Path]:
+def resolve_targets(targets: List[str]) -> List[Path]:
     """Resolve literal paths and glob patterns to unique absolute files.
 
     ``**`` is supported. Results are sorted to make repeated runs deterministic.

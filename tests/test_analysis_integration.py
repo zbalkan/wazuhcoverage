@@ -1,6 +1,7 @@
 import gzip
 import json
 from pathlib import Path
+from typing import Dict, List  # noqa: UP035
 
 import duckdb
 import pytest
@@ -9,19 +10,19 @@ from wazuhcoverage import analysis as analysis_module
 from wazuhcoverage import analyze_archive  # type: ignore
 
 
-def _write_jsonl(path: Path, rows: list[dict]) -> None:
+def _write_jsonl(path: Path, rows: List[Dict]) -> None:  # noqa: UP006
     with path.open("w", encoding="utf-8") as stream:
         for row in rows:
             stream.write(json.dumps(row) + "\n")
 
 
-def _write_jsonl_gz(path: Path, rows: list[dict]) -> None:
+def _write_jsonl_gz(path: Path, rows: List[Dict]) -> None:  # noqa: UP006
     with gzip.open(path, "wt", encoding="utf-8") as stream:
         for row in rows:
             stream.write(json.dumps(row) + "\n")
 
 
-def _fixture_rows() -> list[dict]:
+def _fixture_rows() -> List[Dict]:  # noqa: UP006
     return [
         {
             "timestamp": "2026-09-18T10:00:00+00:00",
@@ -257,7 +258,7 @@ def test_duckdb_spill_directory_is_removed_after_success_and_failure(tmp_path: P
     archive = tmp_path / "archives.json"
     _write_jsonl(archive, [{"full_log": "event", "decoder": {}}])
     real_temporary_directory = analysis_module.tempfile.TemporaryDirectory
-    created: list[Path] = []
+    created: List[Path] = []  # noqa: UP006
 
     def tracked_temporary_directory(*args, **kwargs):  # type: ignore[no-untyped-def]
         directory = real_temporary_directory(*args, **kwargs)
@@ -583,7 +584,7 @@ def test_empty_archive_reports_zero_percentages(tmp_path: Path) -> None:
     assert all(item.percentage == 0.0 for item in result.status_counts)
 
 
-def _multiline_rows() -> list[dict]:
+def _multiline_rows() -> List[Dict]:  # noqa: UP006
     return [
         {
             "location": "/var/log/app.log",

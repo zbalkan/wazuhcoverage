@@ -51,7 +51,7 @@ def _port() -> int:
 # Each entry is one semantic event class. Correct grouping means one template
 # per family and no template covering two. The near-miss pairs -- 4624/4625,
 # ACCEPT/DROP, Failed/Accepted -- are the ones that matter most.
-FAMILIES: dict[str, Callable[[], str]] = {
+FAMILIES: Dict[str, Callable[[], str]] = {
     "sshd_failed": lambda: f"Failed password for {random.choice(USERS)} from {_ip()} port {_port()} ssh2",
     "sshd_accepted": lambda: f"Accepted publickey for {random.choice(USERS)} from {_ip()} port {_port()} ssh2",
     "sshd_invalid": lambda: f"Invalid user {random.choice(USERS)} from {_ip()} port {_port()}",
@@ -117,7 +117,7 @@ def normalize(text: str) -> str:
     return text.strip()
 
 
-def build_corpus(events_per_family: int = 400, seed: int = 11) -> list[tuple[str, str]]:
+def build_corpus(events_per_family: int = 400, seed: int = 11) -> List[Tuple[str, str]]:
     """Return (family, full_log) pairs."""
 
     random.seed(seed)
@@ -125,13 +125,13 @@ def build_corpus(events_per_family: int = 400, seed: int = 11) -> list[tuple[str
 
 
 def evaluate(
-    rows: list[tuple[str, str]],
+    rows: List[Tuple[str, str]],
     *,
     sim_th: float,
     depth: int,
     max_clusters: int | None = None,
     parametrize_numeric_tokens: bool = True,
-) -> dict:
+) -> Dict:
     config = TemplateMinerConfig()
     config.profiling_enabled = False
     config.masking_instructions = []
@@ -148,18 +148,18 @@ def evaluate(
     assigned = {message: miner.add_log_message(message)["cluster_id"] for message in sorted({m for _, m in events})}
     mined = {cluster.cluster_id: cluster.get_template() for cluster in miner.drain.clusters}
 
-    by_template: dict[str, Counter] = defaultdict(Counter)
+    by_template: Dict[str, Counter] = defaultdict(Counter)
     for (family, message), count in events.items():
         by_template[mined[assigned[message]]][family] += count
 
-    templates_per_family: dict[str, set] = defaultdict(set)
+    templates_per_family: Dict[str, set] = defaultdict(set)
     for template, families in by_template.items():
         for family in families:
             templates_per_family[family].add(template)
 
     return {
         "templates": len(by_template),
-        "impure": {template: dict(f) for template, f in by_template.items() if len(f) > 1},
+        "impure": {template: Dict(f) for template, f in by_template.items() if len(f) > 1},
         "frag": {family: len(t) for family, t in sorted(templates_per_family.items()) if len(t) > 1},
     }
 

@@ -15,7 +15,7 @@ from collections.abc import Generator, Iterable
 from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
-from typing import Any, TextIO, TypeVar, overload
+from typing import Any, List, TextIO, Tuple, TypeVar, overload  # noqa: UP035
 
 from wazuhcoverage import __version__  # type: ignore
 from wazuhcoverage.analysis import DEFAULT_ALERT_THRESHOLD, analyze_archive
@@ -74,7 +74,7 @@ class _ArgumentParser(argparse.ArgumentParser):
         args: Iterable[str] | None = None,
         namespace: Any = None,
     ) -> Any:
-        argument_list: list[str] = list(sys.argv[1:] if args is None else args)
+        argument_list: List[str] = list(sys.argv[1:] if args is None else args)  # noqa: UP006
         version_flags: set[str] = {"-V", "--version"}
         incompatible_flags: set[str] = {
             "-n",
@@ -174,7 +174,7 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: List[str] | None = None) -> int:  # noqa: UP006
     args = build_parser().parse_args(argv)
     with _sigterm_exits_cleanly():
         return _run(args)
@@ -335,7 +335,7 @@ def _same_file(first: Path, second: Path) -> bool:
         return False
 
 
-def _resolve_alert_threshold() -> tuple[int, str]:
+def _resolve_alert_threshold() -> Tuple[int, str]:  # noqa: UP006
     """Resolve the local manager threshold, falling back to Wazuh's default."""
 
     try:
@@ -380,7 +380,7 @@ def _report_one(
         skip_malformed=not args.strict,
     )
 
-    verifications: tuple[Verification, ...] = ()
+    verifications: Tuple[Verification, ...] = ()  # noqa: UP006
     if replay:
         verifications = verify_findings(
             analysis,
