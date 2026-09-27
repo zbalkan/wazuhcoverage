@@ -3,18 +3,18 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, Literal, Tuple, TypeAlias  # noqa: UP035
+from typing import Dict, Literal, Tuple  # noqa: UP035
 
 from wazuhcoverage.models import PROCESSED_STATUS, Finding, Verification
 
-ResolvedOutcome: TypeAlias = Literal[
+ResolvedOutcome = Literal[
     "Processed",
     "Suppressed",
     "Dropped",
     "Unresolved",
 ]
 
-FindingGroup: TypeAlias = Literal[
+FindingGroup = Literal[
     "Dropped",
     "Processed",
     "Unresolved",
