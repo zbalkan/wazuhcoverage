@@ -11,7 +11,7 @@ import tempfile
 from collections.abc import Generator, Iterator
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, BinaryIO, Optional, Union
+from typing import TYPE_CHECKING, Any, BinaryIO
 
 from wazuhcoverage.models import STATUSES, ArchiveAnalysis, Finding, LogTypeCount, StatusCount
 
@@ -150,7 +150,7 @@ def _build_template_miner() -> TemplateMiner:
 
 
 def analyze_archive(
-    path: Union[str, Path],
+    path: str | Path,
     *,
     alert_threshold: int = DEFAULT_ALERT_THRESHOLD,
     skip_malformed: bool = True,
@@ -298,7 +298,7 @@ def _count_rows(connection: DuckDBPyConnection, query: str) -> int:
     return int(row[0])
 
 
-def _string_or_none(value: Any) -> Optional[str]:
+def _string_or_none(value: Any) -> str | None:
     return None if value is None else str(value)
 
 

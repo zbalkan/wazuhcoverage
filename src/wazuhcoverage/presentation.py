@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
 
 from wazuhcoverage.models import PROCESSED_STATUS, Finding, Verification
 
@@ -29,31 +28,27 @@ _FINDING_GROUP = {
     "unverified": "Unresolved",
 }
 
-
 @dataclass(frozen=True)
 class FindingPresentation:
     """Replay-aware fields shared by report renderers."""
 
     status: str
-    log_type: Optional[str]
-    decoder: Optional[str]
-    rule_id: Optional[str]
-    rule_level: Optional[int]
-    rule_description: Optional[str]
-    replay_error: Optional[str]
-
+    log_type: str | None
+    decoder: str | None
+    rule_id: str | None
+    rule_level: int | None
+    rule_description: str | None
+    replay_error: str | None
 
 def effective_outcome(status: str) -> str:
     """Map an effective status to the report's resolved outcome."""
 
     return _EFFECTIVE_OUTCOME[status]
 
-
 def finding_group(status: str) -> str:
     """Return the Findings section for an observed or effective status."""
 
     return _FINDING_GROUP[status]
-
 
 def outcome_counts(statuses: dict[str, int], *, resolved: bool) -> dict[str, int]:
     """Aggregate statuses using archive-only or replay-resolved semantics."""
@@ -70,10 +65,9 @@ def outcome_counts(statuses: dict[str, int], *, resolved: bool) -> dict[str, int
         counts[effective_outcome(status)] += count
     return counts
 
-
 def present_finding(
     finding: Finding,
-    verification: Optional[Verification],
+    verification: Verification | None,
 ) -> FindingPresentation:
     """Resolve display fields without mixing stale archive values into replay."""
 

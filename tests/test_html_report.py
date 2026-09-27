@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 from dataclasses import replace
 from pathlib import Path
-from typing import Optional
 
 from wazuhcoverage.html_report import render_html_report
 from wazuhcoverage.models import ArchiveAnalysis, Finding, LogTypeCount, StatusCount, Verification
@@ -44,15 +43,14 @@ def _analysis() -> ArchiveAnalysis:
         ),
     )
 
-
 def _verification(
     state: str = "uncovered",
     *,
-    decoder: Optional[str] = "auditd",
-    rule_id: Optional[str] = None,
-    rule_level: Optional[int] = None,
-    rule_description: Optional[str] = None,
-    error: Optional[str] = None,
+    decoder: str | None = "auditd",
+    rule_id: str | None = None,
+    rule_level: int | None = None,
+    rule_description: str | None = None,
+    error: str | None = None,
 ) -> Verification:
     return Verification(
         finding_key="gap",
@@ -65,7 +63,6 @@ def _verification(
         rule_groups=(),
         error=error,
     )
-
 
 def test_html_report_embeds_template_css_js_and_uses_pinned_cdns() -> None:
     rendered = render_html_report(
@@ -86,7 +83,6 @@ def test_html_report_embeds_template_css_js_and_uses_pinned_cdns() -> None:
     assert "Metrics by log type" in rendered
     assert "Dropped" in rendered
 
-
 def test_html_report_escapes_finding_content_and_keeps_it_out_of_chart_json() -> None:
     rendered = render_html_report(_analysis(), (_verification(),))
 
@@ -98,19 +94,16 @@ def test_html_report_escapes_finding_content_and_keeps_it_out_of_chart_json() ->
     assert 'alert("x")' not in report_data
     assert "<script>" not in report_data
 
-
 def test_html_report_uses_replay_state_for_findings_and_metrics() -> None:
     rendered = render_html_report(_analysis(), (_verification(),))
 
     assert "<strong>uncovered · auditd · 2 events</strong>" in rendered
     assert "<small>Uncovered</small><h2>20.00%</h2><p>2 / 10</p>" in rendered
 
-
 def _report_data(rendered: str) -> dict:
     payload = rendered.split('<script id="report-data" type="application/json">', 1)[1]
     payload = payload.split("</script>", 1)[0]
     return json.loads(payload)
-
 
 def test_archive_only_html_uses_observed_outcome_semantics_and_shows_caveat() -> None:
     rendered = render_html_report(_analysis())
@@ -128,7 +121,6 @@ def test_archive_only_html_uses_observed_outcome_semantics_and_shows_caveat() ->
     assert "Archive ambiguity" in rendered
     assert "Without complete replay" in rendered
 
-
 def test_replay_fields_do_not_fall_back_to_stale_archive_decoder_or_rule() -> None:
     finding = replace(
         _analysis().findings[0],
@@ -145,7 +137,6 @@ def test_replay_fields_do_not_fall_back_to_stale_archive_decoder_or_rule() -> No
     assert "<th>Rule</th><td>—</td>" in rendered
     assert "<th>Level</th><td>—</td>" in rendered
     assert ">42<" not in rendered
-
 
 def test_replay_description_and_contribution_data_are_rendered() -> None:
     verification = _verification(

@@ -4,13 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
 
 # These dataclasses are part of the public, py.typed API, so their annotations
-# must stay resolvable at runtime on every supported interpreter. Optional[...]
-# is used instead of PEP 604 "X | None" because Python 3.9 cannot evaluate the
-# union operator when a consumer calls typing.get_type_hints(). PEP 585 builtin
-# generics such as tuple[...] are subscriptable on 3.9 and are kept as-is.
+# must stay resolvable at runtime on every supported interpreter. Python 3.10+
+# can evaluate the PEP 604 union syntax used here.
 # Bucket identifiers, in declared order. They name what the archive record
 # proves, not what analysisd did internally, because an archive event carries
 # no trace of the rule evaluation that produced it.
@@ -40,7 +37,6 @@ STATUSES = (
 PROCESSED_STATUS = "at_or_above_threshold"
 DROPPED_STATUSES = tuple(status for status in STATUSES if status != PROCESSED_STATUS)
 
-
 @dataclass(frozen=True)
 class StatusCount:
     status: str
@@ -50,11 +46,10 @@ class StatusCount:
     # float representation) across all statuses of a non-empty archive.
     percentage: float
 
-
 @dataclass(frozen=True)
 class LogTypeCount:
     status: str
-    log_type: Optional[str]
+    log_type: str | None
     event_count: int
     # Share of ArchiveAnalysis.total_events, in percent.
     percentage: float
@@ -63,7 +58,6 @@ class LogTypeCount:
     # archive, status_percentage ranks it inside its own bucket, where a small
     # bucket can still be dominated by one source.
     status_percentage: float
-
 
 # What a replay through wazuh-logtest found, in declared order. These are not
 # the archive's buckets: logtest reports the rule it matched whatever that
@@ -80,28 +74,26 @@ EFFECTIVE_STATES = (
     "unverified",
 )
 
-
 @dataclass(frozen=True)
 class Finding:
     finding_key: str
     observed_status: str
-    log_type: Optional[str]
+    log_type: str | None
     message_pattern: str
     event_count: int
     affected_agents: int
-    first_seen: Optional[str]
-    last_seen: Optional[str]
-    observed_decoder: Optional[str]
+    first_seen: str | None
+    last_seen: str | None
+    observed_decoder: str | None
     # The location of the event sample_log was taken from, which is what a
     # faithful replay has to report to Wazuh: the decoder chain consults it,
     # so a sample replayed under the wrong location can resolve to a
     # different decoder than the one that actually ran. The decoder and rule
     # fields come from that same event.
-    observed_location: Optional[str]
-    observed_rule_id: Optional[str]
-    observed_rule_level: Optional[int]
+    observed_location: str | None
+    observed_rule_id: str | None
+    observed_rule_level: int | None
     sample_log: str
-
 
 @dataclass(frozen=True)
 class Verification:
@@ -116,15 +108,14 @@ class Verification:
     effective_state: str
     # The raw LogtestStatus name (RuleMatch, NoRule, NoDecoder, Error), kept so
     # a caller can tell a daemon error apart from a clean "nothing matched".
-    logtest_status: Optional[str]
-    decoder: Optional[str]
-    rule_id: Optional[str]
-    rule_level: Optional[int]
-    rule_description: Optional[str]
+    logtest_status: str | None
+    decoder: str | None
+    rule_id: str | None
+    rule_level: int | None
+    rule_description: str | None
     rule_groups: tuple[str, ...]
     # Why the state is "unverified"; None whenever it is not.
-    error: Optional[str]
-
+    error: str | None
 
 @dataclass(frozen=True)
 class ArchiveAnalysis:

@@ -123,7 +123,7 @@ A finding represents a group of similar uncovered events. It includes event coun
 
 ## Manager replay
 
-An archive alone cannot always distinguish an event that was genuinely unmatched from one that was deliberately quiet. When the optional `logtest` extra is installed and a usable Wazuh manager socket is available, the CLI automatically replays one representative sample per relevant finding through `wazuh-logtest`.
+An archive alone cannot always distinguish an event that was genuinely unmatched from one that was deliberately quiet. The CLI automatically replays one representative sample per relevant finding through the local `wazuh-logtest` socket when that socket is reachable. If the socket is absent, not answering, or not permitted, the CLI states the reason and produces an archive-only report.
 
 The replay provides an effective state for the representative sample:
 

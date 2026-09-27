@@ -7,11 +7,9 @@
 
 It reads `archives.json` and `archives.json.gz` produced when Wazuh JSON archiving is enabled and never modifies them. See the Wazuh documentation for [archiving event logs](https://documentation.wazuh.com/current/user-manual/manager/event-logging.html#archiving-event-logs).
 
-When a usable Wazuh manager is available, `wazuhcoverage` can replay representative findings through `wazuh-logtest` and report what the current ruleset does with them. Without a manager it remains an offline archive analyzer.
+`wazuhcoverage` supports Linux only and requires Python 3.10 or newer. Findings are replayed through the local `wazuh-logtest` socket, so a full report needs a running Wazuh manager that the invoking user can reach. If the socket is absent, unresponsive, or not permitted, the CLI states why replay is unavailable and produces the archive-only analysis instead.
 
 ## Installation
-
-Python 3.9 or newer is supported; Python 3.10 or newer is recommended.
 
 For command-line use:
 
@@ -25,13 +23,9 @@ For use as a Python library:
 python -m pip install wazuhcoverage
 ```
 
-Manager replay is an optional extra. It requires Linux, Python 3.10 or newer, and access to a running Wazuh manager:
+`wazuhtester` is a runtime dependency because replay is part of the normal coverage workflow. A missing or unreachable manager does not make archive analysis fail; the CLI reports the socket problem and continues with an archive-only report.
 
-```bash
-pipx install "wazuhcoverage[logtest]"
-```
-
-The base package installs DuckDB for archive analysis and drain3 for finding grouping. Dependency constraints and their rationale are documented in [design notes](docs/DESIGN.md#dependency-constraints).
+The package installs DuckDB for archive analysis and drain3 for finding grouping. Dependency constraints and their rationale are documented in [design notes](docs/DESIGN.md#dependency-constraints).
 
 ## Quick start
 
@@ -89,7 +83,7 @@ The sample is retained for validation and replay rather than reconstructed from 
 
 ## Manager replay
 
-If the `logtest` extra is installed and the manager socket is usable, the CLI automatically replays representative findings. This can distinguish several states that the archive alone cannot safely separate, including genuinely uncovered events and events matched by a level-0 rule.
+The CLI automatically replays representative findings through the local manager's `wazuh-logtest` socket when it is reachable. This can distinguish several states that the archive alone cannot safely separate, including genuinely uncovered events and events matched by a level-0 rule. If the socket cannot be used, the CLI reports the reason and produces the archive-only report.
 
 Replay answers for the manager being queried now, not necessarily the manager configuration that originally wrote the archive. It also cannot reproduce every stateful rule from one representative event. See [CAVEATS.md](docs/CAVEATS.md) for the interpretation limits and the Wazuh references behind them.
 

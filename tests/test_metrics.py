@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
 
 import pytest
 
@@ -32,13 +31,12 @@ def _finding(key: str, status: str, log_type: str, count: int) -> Finding:
         sample_log=key,
     )
 
-
 def _verification(
     key: str,
     state: str,
     *,
-    decoder: Optional[str] = None,
-    level: Optional[int] = None,
+    decoder: str | None = None,
+    level: int | None = None,
 ) -> Verification:
     return Verification(
         finding_key=key,
@@ -51,7 +49,6 @@ def _verification(
         rule_groups=(),
         error="replay failed" if state == "unverified" else None,
     )
-
 
 def _analysis() -> ArchiveAnalysis:
     return ArchiveAnalysis(
@@ -80,7 +77,6 @@ def _analysis() -> ArchiveAnalysis:
         ),
     )
 
-
 def _verifications() -> tuple[Verification, ...]:
     return (
         _verification("nd", "no_decoder", decoder=None),
@@ -88,7 +84,6 @@ def _verifications() -> tuple[Verification, ...]:
         _verification("s", "suppressed", decoder="auditd", level=0),
         _verification("v", "unverified", decoder=None),
     )
-
 
 def test_archive_only_metrics_keep_ambiguous_events_uncertain() -> None:
     snapshot = calculate_metrics(_analysis())
@@ -112,7 +107,6 @@ def test_archive_only_metrics_keep_ambiguous_events_uncertain() -> None:
     assert snapshot.uncovered_rate.denominator is None
     assert snapshot.uncovered_rate.ratio is None
 
-
 def test_replay_refines_metrics_without_changing_the_total_population() -> None:
     snapshot = calculate_metrics(_analysis(), _verifications())
 
@@ -133,13 +127,11 @@ def test_replay_refines_metrics_without_changing_the_total_population() -> None:
     assert snapshot.uncertainty_rate.count == 30
     assert snapshot.uncertainty_rate.ratio == pytest.approx(0.03)
 
-
 def test_partial_replay_does_not_turn_an_incomplete_uncovered_count_into_zero() -> None:
     snapshot = calculate_metrics(_analysis(), (_verifications()[1],))
 
     assert snapshot.uncovered_rate.available is False
     assert snapshot.uncovered_rate.ratio is None
-
 
 def test_uncovered_is_measurable_without_replay_when_no_ruleless_decoded_events_exist() -> None:
     analysis = ArchiveAnalysis(
@@ -163,7 +155,6 @@ def test_uncovered_is_measurable_without_replay_when_no_ruleless_decoded_events_
     assert snapshot.uncovered_rate.denominator == 9
     assert snapshot.uncovered_rate.ratio == 0.0
 
-
 def test_per_log_type_metrics_expose_local_rate_and_global_contribution() -> None:
     snapshot = calculate_metrics(_analysis(), _verifications())
     rows = {item.log_type: item for item in snapshot.log_types}
@@ -177,7 +168,6 @@ def test_per_log_type_metrics_expose_local_rate_and_global_contribution() -> Non
     assert rows["auditd"].below_threshold_rate.count == 350
     assert rows["auditd"].below_threshold_rate.ratio == pytest.approx(1.0)
     assert rows["auditd"].below_threshold_contribution.ratio == pytest.approx(1.0)
-
 
 def test_populated_contributions_sum_to_one() -> None:
     snapshot = calculate_metrics(_analysis(), _verifications())
@@ -202,7 +192,6 @@ def test_populated_contributions_sum_to_one() -> None:
     assert sum(uncovered) == pytest.approx(1.0)
     assert sum(below) == pytest.approx(1.0)
 
-
 def test_replay_decoder_moves_the_effective_log_type() -> None:
     verifications = list(_verifications())
     verifications[1] = _verification("u", "uncovered", decoder="normalized-firewall")
@@ -212,7 +201,6 @@ def test_replay_decoder_moves_the_effective_log_type() -> None:
 
     assert rows["normalized-firewall"].uncovered_rate.count == 90
     assert "firewall" not in rows
-
 
 def test_empty_population_is_distinct_from_an_unavailable_metric() -> None:
     analysis = ArchiveAnalysis(
@@ -233,7 +221,6 @@ def test_empty_population_is_distinct_from_an_unavailable_metric() -> None:
     assert snapshot.uncovered_rate.available is True
     assert snapshot.uncovered_rate.denominator == 0
     assert snapshot.uncovered_rate.ratio is None
-
 
 def test_machine_readable_metrics_keep_fractional_rates_and_availability() -> None:
     payload = metrics_to_dict(calculate_metrics(_analysis()))

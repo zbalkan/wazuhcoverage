@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Optional, Union
 
 DEFAULT_OSSEC_CONF = Path("/var/ossec/etc/ossec.conf")
 MIN_ALERT_THRESHOLD = 1
@@ -15,8 +14,7 @@ _LOG_ALERT_LEVEL_RE = re.compile(
     r"<log_alert_level>\s*([^<]*?)\s*</log_alert_level>"
 )
 
-
-def read_alert_threshold(path: Union[str, Path] = DEFAULT_OSSEC_CONF) -> Optional[int]:
+def read_alert_threshold(path: str | Path = DEFAULT_OSSEC_CONF) -> int | None:
     """Return log_alert_level from ossec.conf, or None when it is not set.
 
     Wazuh configuration is XML-like rather than a single strict XML document,

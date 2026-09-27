@@ -7,7 +7,6 @@ import re
 from collections.abc import Sequence
 from datetime import datetime
 from html import escape
-from typing import Optional
 
 from wazuhcoverage.metrics import MetricSnapshot, MetricValue, calculate_metrics, resolve_effective_counts
 from wazuhcoverage.models import ArchiveAnalysis, Finding, Verification
@@ -486,13 +485,12 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
 </html>
 """
 
-
 def render_html_report(
     analysis: ArchiveAnalysis,
     verifications: Sequence[Verification] = (),
     *,
-    alert_threshold: Optional[int] = None,
-    threshold_source: Optional[str] = None,
+    alert_threshold: int | None = None,
+    threshold_source: str | None = None,
 ) -> str:
     """Render one archive as a single HTML file with CDN-backed presentation."""
 
@@ -537,7 +535,6 @@ def render_html_report(
         _HTML_TEMPLATE,
     )
 
-
 def _render_metric_cards(snapshot: MetricSnapshot) -> str:
     metrics = (
         ("Malformed input", snapshot.malformed_rate),
@@ -547,7 +544,6 @@ def _render_metric_cards(snapshot: MetricSnapshot) -> str:
         ("Unresolved", snapshot.uncertainty_rate),
     )
     return "\n".join(_render_metric_card(label, metric) for label, metric in metrics)
-
 
 def _render_metric_card(label: str, metric: MetricValue) -> str:
     if not metric.available:
@@ -568,7 +564,6 @@ def _render_metric_card(label: str, metric: MetricValue) -> str:
         "</article>"
     )
 
-
 def _render_outcome_table(outcomes: dict[str, int], total: int) -> str:
     rows = []
     for name, count in outcomes.items():
@@ -586,7 +581,6 @@ def _render_outcome_table(outcomes: dict[str, int], total: int) -> str:
         + "".join(rows)
         + "</tbody></table></figure>"
     )
-
 
 def _render_log_type_table(snapshot: MetricSnapshot) -> str:
     rows = []
@@ -618,9 +612,8 @@ def _render_log_type_table(snapshot: MetricSnapshot) -> str:
         + "</tbody></table></figure>"
     )
 
-
 def _render_log_type_outcome_table(
-    log_types: dict[Optional[str], dict[str, int]],
+    log_types: dict[str | None, dict[str, int]],
     *,
     resolved: bool,
 ) -> str:
@@ -653,13 +646,12 @@ def _render_log_type_outcome_table(
         + "</tbody></table></figure>"
     )
 
-
 def _render_findings(
     analysis: ArchiveAnalysis,
     verifications: Sequence[Verification],
 ) -> str:
     by_key = {item.finding_key: item for item in verifications}
-    grouped: dict[str, list[tuple[Finding, Optional[Verification]]]] = {
+    grouped: dict[str, list[tuple[Finding, Verification | None]]] = {
         group: [] for group in FINDING_GROUPS
     }
 
@@ -680,8 +672,7 @@ def _render_findings(
         return "<p>No findings.</p>"
     return "".join(sections)
 
-
-def _render_finding(finding: Finding, verification: Optional[Verification]) -> str:
+def _render_finding(finding: Finding, verification: Verification | None) -> str:
     presented = present_finding(finding, verification)
 
     metadata = (
@@ -724,7 +715,6 @@ def _render_finding(finding: Finding, verification: Optional[Verification]) -> s
         "</details>"
     )
 
-
 def _render_findings_note(
     analysis: ArchiveAnalysis,
     verifications: Sequence[Verification],
@@ -744,7 +734,6 @@ def _render_findings_note(
         "wazuh-logtest to distinguish those states.</p>"
         "</article>"
     )
-
 
 def _contributors(snapshot: MetricSnapshot, metric: str) -> list[dict[str, object]]:
     attributes = {
@@ -778,9 +767,8 @@ def _contributors(snapshot: MetricSnapshot, metric: str) -> list[dict[str, objec
     rows.sort(key=lambda row: (-float(row["value"]), -int(row["events"]), str(row["name"])))
     return rows[:10]
 
-
 def _chart_log_types(
-    log_types: dict[Optional[str], dict[str, int]],
+    log_types: dict[str | None, dict[str, int]],
     *,
     resolved: bool,
 ) -> list[dict[str, object]]:
@@ -797,12 +785,10 @@ def _chart_log_types(
     rows.sort(key=lambda item: (-int(item["total"]), str(item["name"])))
     return rows[:20]
 
-
-def _percent(ratio: Optional[float], available: bool = True) -> str:
+def _percent(ratio: float | None, available: bool = True) -> str:
     if not available:
         return "Unavailable"
     return "n/a" if ratio is None else f"{ratio * 100:.2f}%"
-
 
 def _safe_json(value: object) -> str:
     return (

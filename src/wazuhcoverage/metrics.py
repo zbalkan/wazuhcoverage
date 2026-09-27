@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any
 
 from wazuhcoverage.models import ArchiveAnalysis, Verification
 
@@ -16,9 +16,9 @@ _BELOW_THRESHOLD_STATES = ("suppressed", "below_threshold")
 class MetricValue:
     """One measured ratio with its auditable numerator and denominator."""
 
-    count: Optional[int]
-    denominator: Optional[int]
-    ratio: Optional[float]
+    count: int | None
+    denominator: int | None
+    ratio: float | None
     available: bool = True
 
 
@@ -26,7 +26,7 @@ class MetricValue:
 class LogTypeMetrics:
     """Reliability and efficiency measurements for one effective log type."""
 
-    log_type: Optional[str]
+    log_type: str | None
     event_count: int
     decoder_failure_rate: MetricValue
     decoder_failure_contribution: MetricValue
@@ -115,11 +115,11 @@ def calculate_metrics(
 def resolve_effective_counts(
     analysis: ArchiveAnalysis,
     verifications: Sequence[Verification] = (),
-) -> tuple[dict[str, int], dict[Optional[str], dict[str, int]]]:
+) -> tuple[dict[str, int], dict[str | None, dict[str, int]]]:
     """Return whole-archive status and log-type counts after replay replacements."""
 
     statuses = {item.status: item.event_count for item in analysis.status_counts}
-    log_types: dict[Optional[str], dict[str, int]] = {}
+    log_types: dict[str | None, dict[str, int]] = {}
     for item in analysis.log_type_counts:
         counts = log_types.setdefault(item.log_type, {})
         counts[item.status] = counts.get(item.status, 0) + item.event_count
@@ -212,7 +212,7 @@ def _replay_complete(
 
 
 def _log_type_metrics(
-    log_type: Optional[str],
+    log_type: str | None,
     counts: dict[str, int],
     *,
     decoder_failures: int,

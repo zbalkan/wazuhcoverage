@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Literal, Optional
+from typing import Literal
 
 from wazuhcoverage.metrics import MetricSnapshot, MetricValue, calculate_metrics, resolve_effective_counts
 from wazuhcoverage.models import (
@@ -49,8 +49,8 @@ def render_report(
     analysis: ArchiveAnalysis,
     verifications: Sequence[Verification] = (),
     *,
-    alert_threshold: Optional[int] = None,
-    threshold_source: Optional[str] = None,
+    alert_threshold: int | None = None,
+    threshold_source: str | None = None,
 ) -> str:
     """Render a compact human-readable report for one archive.
 
@@ -112,7 +112,7 @@ def render_report(
     if not by_key:
         lines.extend(_no_alerting_rule_note(analysis))
 
-    grouped: dict[str, list[tuple[Finding, Optional[Verification]]]] = {
+    grouped: dict[str, list[tuple[Finding, Verification | None]]] = {
         group: [] for group in FINDING_GROUPS
     }
     for finding in analysis.findings:
@@ -133,7 +133,7 @@ def render_report(
     return "\n".join(lines).rstrip() + "\n"
 
 
-def _finding_rows(index: int, finding: Finding, verification: Optional[Verification]) -> list[str]:
+def _finding_rows(index: int, finding: Finding, verification: Verification | None) -> list[str]:
     """Render a finding within its effective outcome group."""
 
     presented = present_finding(finding, verification)
@@ -245,7 +245,7 @@ def _resolved_outcome_table(statuses: dict[str, int], total: int) -> list[str]:
     return rows
 
 
-def _resolved_log_type_table(log_types: dict[Optional[str], dict[str, int]], total: int) -> list[str]:
+def _resolved_log_type_table(log_types: dict[str | None, dict[str, int]], total: int) -> list[str]:
     """Include every log type, including those without replayed findings."""
 
     rows = [
@@ -457,10 +457,10 @@ def _no_alerting_rule_note(analysis: ArchiveAnalysis) -> list[str]:
 
 def _summarize_log_types(
     analysis: ArchiveAnalysis,
-) -> list[tuple[Optional[str], int, dict[str, int]]]:
+) -> list[tuple[str | None, int, dict[str, int]]]:
     """Pivot detailed status/log-type counts into one row per log type."""
 
-    by_log_type: dict[Optional[str], dict[str, int]] = {}
+    by_log_type: dict[str | None, dict[str, int]] = {}
     for item in analysis.log_type_counts:
         status_counts = by_log_type.setdefault(item.log_type, {})
         status_counts[item.status] = status_counts.get(item.status, 0) + item.event_count

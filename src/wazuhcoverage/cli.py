@@ -15,7 +15,7 @@ from collections.abc import Generator, Iterable
 from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
-from typing import Any, Optional, TextIO, TypeVar, overload
+from typing import Any, TextIO, TypeVar, overload
 
 from wazuhcoverage import __version__
 from wazuhcoverage.analysis import DEFAULT_ALERT_THRESHOLD, analyze_archive
@@ -51,7 +51,7 @@ class _ArgumentParser(argparse.ArgumentParser):
     @overload
     def parse_args(
         self,
-        args: Optional[Iterable[str]] = None,
+        args: Iterable[str] | None = None,
         namespace: None = None,
     ) -> argparse.Namespace:
         ...
@@ -59,7 +59,7 @@ class _ArgumentParser(argparse.ArgumentParser):
     @overload
     def parse_args(
         self,
-        args: Optional[Iterable[str]],
+        args: Iterable[str] | None,
         namespace: _Namespace,
     ) -> _Namespace:
         ...
@@ -74,7 +74,7 @@ class _ArgumentParser(argparse.ArgumentParser):
 
     def parse_args(
         self,
-        args: Optional[Iterable[str]] = None,
+        args: Iterable[str] | None = None,
         namespace: Any = None,
     ) -> Any:
         argument_list: list[str] = list(sys.argv[1:] if args is None else args)
@@ -177,7 +177,7 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: Optional[list[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     with _sigterm_exits_cleanly():
         return _run(args)
@@ -224,9 +224,9 @@ def _run(args: argparse.Namespace) -> int:
     if reason is not None:
         # Two lines rather than one: the reason can be long, and the
         # consequence is the part a reader has to act on.
-        print(f"wazuhcoverage: {reason}", file=sys.stderr)
+        print(f"wazuhcoverage: manager replay unavailable: {reason}", file=sys.stderr)
         print(
-            "wazuhcoverage: reporting from the archive alone, which cannot tell "
+            "wazuhcoverage: producing an archive-only report, which cannot tell "
             "an unmatched event from a suppressed one; see docs/CAVEATS.md",
             file=sys.stderr,
         )
@@ -278,7 +278,7 @@ def _run(args: argparse.Namespace) -> int:
 
 
 # The exit status a received SIGTERM asks for, or None while none has arrived.
-_termination_status: Optional[int] = None
+_termination_status: int | None = None
 
 
 @contextmanager
@@ -503,7 +503,7 @@ def _stdin_bytes() -> Any:
     decoding layer would corrupt a compressed stream outright.
     """
 
-    stream: Optional[TextIO] = sys.stdin
+    stream: TextIO | None = sys.stdin
     if stream is None:
         raise RuntimeError("standard input is not available")
     return getattr(stream, "buffer", stream)
