@@ -2,11 +2,6 @@ name: CI
 
 on:
   push:
-    branches:
-      - main
-      - master
-      - "roadmap/**"
-      - "fix/**"
     # Keep documentation-only edits from spending the full test matrix, while
     # still testing changes to non-Markdown assets and every other file type.
     paths-ignore: &markdown-only

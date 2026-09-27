@@ -301,3 +301,22 @@ def test_cluster_eviction_keeps_prior_assignments(tmp_path: Path, monkeypatch) -
     assert result.total_events == len(rows)
     assert len(result.findings) == len(rows)
     assert sum(finding.event_count for finding in result.findings) == len(rows)
+
+
+def test_timestamp_preprocessing_prevents_drain_fragmentation(tmp_path: Path) -> None:
+    archive = tmp_path / "archives.json"
+    rows = [
+        _undecoded("Sep 26 13:58:42 daemon failed for alice", "001"),
+        _undecoded("Oct  1 13:59:42 daemon failed for bob", "002"),
+        _undecoded("2026-09-26T14:00:42Z daemon failed for carol", "003"),
+        _undecoded("Sat Sep 26 14:01:42 2026 daemon failed for dave", "004"),
+    ]
+    _write_jsonl(archive, rows)
+
+    result = analyze_archive(archive)
+
+    assert len(result.findings) == 1
+    finding = result.findings[0]
+    assert finding.event_count == len(rows)
+    assert finding.message_pattern == "<TIMESTAMP> daemon failed for <*>"
+    assert finding.sample_log in {row["full_log"] for row in rows}
