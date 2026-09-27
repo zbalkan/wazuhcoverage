@@ -7,7 +7,7 @@
 
 It reads `archives.json` and `archives.json.gz` produced when Wazuh JSON archiving is enabled and never modifies them. See the Wazuh documentation for [archiving event logs](https://documentation.wazuh.com/current/user-manual/manager/event-logging.html#archiving-event-logs).
 
-`wazuhcoverage` supports Linux only and requires Python 3.10 or newer. Findings are replayed through the local `wazuh-logtest` socket, so a full report needs a running Wazuh manager that the invoking user can reach. If the socket is absent, unresponsive, or not permitted, the CLI states why replay is unavailable and produces the archive-only analysis instead.
+`wazuhcoverage` supports Linux only and requires Python 3.9 or newer. Findings are replayed through the local `wazuh-logtest` socket, so a full report needs a running Wazuh manager that the invoking user can reach. If the socket is absent, unresponsive, or not permitted, the CLI states why replay is unavailable and produces the archive-only analysis instead.
 
 ## Installation
 
