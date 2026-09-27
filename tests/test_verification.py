@@ -1,7 +1,7 @@
 """Verification maps logtest replies onto effective states.
 
 The tests stub wazuhtester rather than importing it: the library needs Linux,
-Python 3.10 or newer and a running Wazuh manager, none of which this suite may
+Python 3.9 or newer and a running Wazuh manager, none of which this suite may
 assume, and all the logic under test is the mapping on this side of the call.
 """
 

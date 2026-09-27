@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 # These dataclasses are part of the public, py.typed API, so their annotations
-# must stay resolvable at runtime on every supported interpreter. Python 3.10+
+# must stay resolvable at runtime on every supported interpreter. Python 3.9+
 # can evaluate the PEP 604 union syntax used here.
 # Bucket identifiers, in declared order. They name what the archive record
 # proves, not what analysisd did internally, because an archive event carries
