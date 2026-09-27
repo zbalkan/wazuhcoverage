@@ -1,8 +1,8 @@
 """Verification maps logtest replies onto effective states.
 
-The tests stub wazuhtester rather than importing it: the library needs Linux,
-Python 3.9 or newer and a running Wazuh manager, none of which this suite may
-assume, and all the logic under test is the mapping on this side of the call.
+The tests stub wazuhtester to isolate the mapping logic from the local
+wazuh-logtest socket and manager state. Package compatibility is exercised by
+the CI install matrix across every supported Python version.
 """
 
 from dataclasses import replace

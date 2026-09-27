@@ -44,7 +44,7 @@ dependencies = [
   "drain3>=0.9.11,<1",
   # Replay is part of the normal coverage workflow. The project is Linux-only,
   # matching wazuhtester and the local wazuh-logtest Unix-socket interface.
-  "wazuhtester>=0.1.0rc1,<1",
+  "wazuhtester>=0.1.0,<1",
 ]
 
 [project.optional-dependencies]
