@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from wazuhcoverage import ArchiveAnalysis, Finding, LogTypeCount, StatusCount, Verification, cli
+from wazuhcoverage import ArchiveAnalysis, Finding, LogTypeCount, StatusCount, Verification, cli  # type: ignore
 
 
 def _analysis(path: Path) -> ArchiveAnalysis:

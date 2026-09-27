@@ -3,13 +3,38 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Literal, TypeAlias
 
 from wazuhcoverage.models import PROCESSED_STATUS, Finding, Verification
 
-RESOLVED_OUTCOMES = ("Processed", "Suppressed", "Dropped", "Unresolved")
-FINDING_GROUPS = ("Dropped", "Processed", "Unresolved")
+ResolvedOutcome: TypeAlias = Literal[
+    "Processed",
+    "Suppressed",
+    "Dropped",
+    "Unresolved",
+]
 
-_EFFECTIVE_OUTCOME = {
+FindingGroup: TypeAlias = Literal[
+    "Dropped",
+    "Processed",
+    "Unresolved",
+]
+
+
+RESOLVED_OUTCOMES: tuple[ResolvedOutcome, ...] = (
+    "Processed",
+    "Suppressed",
+    "Dropped",
+    "Unresolved",
+)
+
+FINDING_GROUPS: tuple[FindingGroup, ...] = (
+    "Dropped",
+    "Processed",
+    "Unresolved",
+)
+
+_EFFECTIVE_OUTCOME: dict[str, ResolvedOutcome] = {
     "at_or_above_threshold": "Processed",
     "suppressed": "Suppressed",
     "below_threshold": "Suppressed",
@@ -18,7 +43,8 @@ _EFFECTIVE_OUTCOME = {
     "no_alerting_rule": "Unresolved",
     "unverified": "Unresolved",
 }
-_FINDING_GROUP = {
+
+_FINDING_GROUP: dict[str, FindingGroup] = {
     "no_decoder": "Dropped",
     "uncovered": "Dropped",
     "at_or_above_threshold": "Processed",
@@ -42,13 +68,13 @@ class FindingPresentation:
     replay_error: str | None
 
 
-def effective_outcome(status: str) -> str:
+def effective_outcome(status: str) -> ResolvedOutcome:
     """Map an effective status to the report's resolved outcome."""
 
     return _EFFECTIVE_OUTCOME[status]
 
 
-def finding_group(status: str) -> str:
+def finding_group(status: str) -> FindingGroup:
     """Return the Findings section for an observed or effective status."""
 
     return _FINDING_GROUP[status]
@@ -64,9 +90,10 @@ def outcome_counts(statuses: dict[str, int], *, resolved: bool) -> dict[str, int
             "Dropped": sum(statuses.values()) - processed,
         }
 
-    counts = dict.fromkeys(RESOLVED_OUTCOMES, 0)
+    counts: dict[str, int] = dict.fromkeys(RESOLVED_OUTCOMES, 0)
     for status, count in statuses.items():
         counts[effective_outcome(status)] += count
+
     return counts
 
 

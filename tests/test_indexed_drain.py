@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import random
 
-from drain3.drain import Drain
+from drain3.drain import Drain  # type: ignore
 from pytest import MonkeyPatch
 
 from wazuhcoverage._drain import IndexedDrain

@@ -6,7 +6,7 @@ import math
 from collections import defaultdict
 from collections.abc import Sequence
 
-from drain3.drain import Drain, LogClusterCache, Node
+from drain3.drain import Drain, LogClusterCache, Node  # type: ignore
 
 
 class _IndexedLogClusterCache(LogClusterCache):

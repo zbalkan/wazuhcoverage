@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from wazuhcoverage import ArchiveAnalysis, Finding, cli
+from wazuhcoverage import ArchiveAnalysis, Finding, cli  # type: ignore
 
 
 def test_cli_flags_and_targets() -> None:
@@ -26,7 +26,7 @@ def test_version_flag_prints_the_package_version(capsys) -> None:
             cli.build_parser().parse_args([flag])
 
         assert exit_info.value.code == 0
-        assert capsys.readouterr().out.strip() == f"wazuhcoverage {wazuhcoverage.__version__}"
+        assert capsys.readouterr().out.strip() == f"wazuhcoverage {wazuhcoverage.__version__}"  # type: ignore
 
 
 def test_version_needs_no_target() -> None:
@@ -127,11 +127,12 @@ def test_a_piped_archive_is_analyzed_without_a_target(monkeypatch: pytest.Monkey
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(cli.sys, "stdin", _PipedStdin(rows))
-    monkeypatch.setattr(
-        cli,
-        "analyze_archive",
-        lambda path, **_kwargs: scanned.append(Path(path)) or _analysis(Path(path)),
-    )
+
+    def analyze(path, **_kwargs):
+        scanned.append(Path(path))
+        return _analysis(Path(path))
+
+    monkeypatch.setattr(cli, "analyze_archive", analyze)
 
     assert cli.main(["-n"]) == 0
 
@@ -181,11 +182,12 @@ def test_a_gzipped_pipe_is_spooled_under_a_gz_name(monkeypatch: pytest.MonkeyPat
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(cli.sys, "stdin", _PipedStdin(payload))
-    monkeypatch.setattr(
-        cli,
-        "analyze_archive",
-        lambda path, **_kwargs: suffixes.append("".join(Path(path).suffixes)) or _analysis(Path(path)),
-    )
+
+    def analyze(path, **_kwargs):
+        suffixes.append("".join(Path(path).suffixes))
+        return _analysis(Path(path))
+
+    monkeypatch.setattr(cli, "analyze_archive", analyze)
 
     assert cli.main(["-n"]) == 0
     assert suffixes == [".json.gz"]
@@ -200,11 +202,12 @@ def test_a_plain_pipe_is_spooled_byte_for_byte(monkeypatch: pytest.MonkeyPatch, 
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(cli.sys, "stdin", _PipedStdin(rows))
-    monkeypatch.setattr(
-        cli,
-        "analyze_archive",
-        lambda path, **_kwargs: spooled.append(Path(path).read_bytes()) or _analysis(Path(path)),
-    )
+
+    def analyze(path, **_kwargs):
+        spooled.append(Path(path).read_bytes())
+        return _analysis(Path(path))
+
+    monkeypatch.setattr(cli, "analyze_archive", analyze)
 
     assert cli.main(["-n"]) == 0
     assert spooled == [rows]
@@ -262,7 +265,12 @@ def test_the_same_archive_is_processed_every_run(monkeypatch: pytest.MonkeyPatch
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(cli, "resolve_targets", lambda _targets: [archive])
-    monkeypatch.setattr(cli, "analyze_archive", lambda path, **_kwargs: analyzed.append(path) or _analysis(path))
+
+    def analyze(path, **_kwargs):
+        analyzed.append(path)
+        return _analysis(path)
+
+    monkeypatch.setattr(cli, "analyze_archive", analyze)
     monkeypatch.setattr(cli, "render_report", lambda _analysis, _verifications=(), **_kwargs: "report\n")
 
     assert cli.main([str(archive)]) == 0
@@ -302,11 +310,12 @@ def test_cli_forwards_parsing_mode_to_the_analysis(monkeypatch: pytest.MonkeyPat
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(cli, "resolve_targets", lambda _targets: [archive])
-    monkeypatch.setattr(
-        cli,
-        "analyze_archive",
-        lambda path, **kwargs: received.append(kwargs) or _analysis(path),
-    )
+
+    def analyze(path, **kwargs):
+        received.append(kwargs)
+        return _analysis(path)
+
+    monkeypatch.setattr(cli, "analyze_archive", analyze)
     monkeypatch.setattr(cli, "render_report", lambda _analysis, _verifications=(), **_kwargs: "report\n")
 
     assert cli.main(["--strict", str(archive)]) == 0
@@ -455,11 +464,12 @@ def test_sigterm_exits_cleanly_only_while_a_run_is_active(
     during: list = []
 
     monkeypatch.setattr(cli, "resolve_targets", lambda _targets: [archive])
-    monkeypatch.setattr(
-        cli,
-        "analyze_archive",
-        lambda path, **_kwargs: during.append(signal.getsignal(signal.SIGTERM)) or _analysis(path),
-    )
+
+    def analyze(path, **_kwargs):
+        during.append(signal.getsignal(signal.SIGTERM))
+        return _analysis(path)
+
+    monkeypatch.setattr(cli, "analyze_archive", analyze)
     monkeypatch.setattr(cli, "render_report", lambda _analysis, _verifications=(), **_kwargs: "report\n")
 
     assert signal.getsignal(signal.SIGTERM) is signal.SIG_DFL
@@ -478,11 +488,12 @@ def test_a_host_sigterm_handler_is_left_alone(monkeypatch: pytest.MonkeyPatch, t
         return None
 
     monkeypatch.setattr(cli, "resolve_targets", lambda _targets: [archive])
-    monkeypatch.setattr(
-        cli,
-        "analyze_archive",
-        lambda path, **_kwargs: during.append(signal.getsignal(signal.SIGTERM)) or _analysis(path),
-    )
+
+    def analyze(path, **_kwargs):
+        during.append(signal.getsignal(signal.SIGTERM))
+        return _analysis(path)
+
+    monkeypatch.setattr(cli, "analyze_archive", analyze)
     monkeypatch.setattr(cli, "render_report", lambda _analysis, _verifications=(), **_kwargs: "report\n")
 
     previous = signal.signal(signal.SIGTERM, host_handler)
@@ -569,7 +580,12 @@ def test_a_reachable_daemon_is_used_without_being_asked(
     monkeypatch.setattr(cli, "analyze_archive", lambda path, **_kwargs: _analysis(Path(path)))
     monkeypatch.setattr(cli, "unavailable_reason", lambda: None)
     monkeypatch.setattr(cli, "read_alert_threshold", lambda: 7)
-    monkeypatch.setattr(cli, "verify_findings", lambda analysis, **kwargs: received.append(kwargs) or ())
+
+    def verify_findings(_analysis, **kwargs):
+        received.append(kwargs)
+        return ()
+
+    monkeypatch.setattr(cli, "verify_findings", verify_findings)
     monkeypatch.setattr(cli, "render_report", lambda _analysis, _verifications=(), **_kwargs: "report\n")
 
     assert cli.main(["--log-format", "json", str(archive)]) == 0
@@ -615,7 +631,11 @@ def test_the_daemon_is_probed_once_not_per_archive(monkeypatch: pytest.MonkeyPat
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(cli, "resolve_targets", lambda _targets: archives)
     monkeypatch.setattr(cli, "analyze_archive", lambda path, **_kwargs: _analysis(Path(path)))
-    monkeypatch.setattr(cli, "unavailable_reason", lambda: probes.append(1) and None)
+
+    def unavailable_reason() -> None:
+        probes.append(1)
+
+    monkeypatch.setattr(cli, "unavailable_reason", unavailable_reason)
     monkeypatch.setattr(cli, "verify_findings", lambda *_args, **_kwargs: ())
     monkeypatch.setattr(cli, "render_report", lambda _analysis, _verifications=(), **_kwargs: "report\n")
 
@@ -634,12 +654,17 @@ def test_the_probe_happens_before_the_first_archive_is_read(
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(cli, "resolve_targets", lambda _targets: [archive])
-    monkeypatch.setattr(
-        cli,
-        "analyze_archive",
-        lambda path, **_kwargs: order.append("analyze") or _analysis(Path(path)),
-    )
-    monkeypatch.setattr(cli, "unavailable_reason", lambda: order.append("probe") or "no socket")
+
+    def analyze(path, **_kwargs):
+        order.append("analyze")
+        return _analysis(Path(path))
+
+    def unavailable_reason():
+        order.append("probe")
+        return "no socket"
+
+    monkeypatch.setattr(cli, "analyze_archive", analyze)
+    monkeypatch.setattr(cli, "unavailable_reason", unavailable_reason)
     monkeypatch.setattr(cli, "render_report", lambda _analysis, _verifications=(), **_kwargs: "report\n")
 
     assert cli.main([str(archive)]) == 0
@@ -660,11 +685,12 @@ def test_offline_run_assumes_wazuh_default_threshold(monkeypatch: pytest.MonkeyP
         "read_alert_threshold",
         lambda: (_ for _ in ()).throw(FileNotFoundError("offline")),
     )
-    monkeypatch.setattr(
-        cli,
-        "analyze_archive",
-        lambda path, **kwargs: analyzed.append(kwargs) or _analysis(Path(path)),
-    )
+
+    def analyze(path, **kwargs):
+        analyzed.append(kwargs)
+        return _analysis(Path(path))
+
+    monkeypatch.setattr(cli, "analyze_archive", analyze)
 
     assert cli.main([str(archive)]) == 0
     captured = capsys.readouterr()
@@ -692,11 +718,12 @@ def test_online_run_reads_threshold_once_and_reports_source(
         return 6
 
     monkeypatch.setattr(cli, "read_alert_threshold", read_threshold)
-    monkeypatch.setattr(
-        cli,
-        "analyze_archive",
-        lambda path, **kwargs: analyzed.append(kwargs) or _analysis(Path(path)),
-    )
+
+    def analyze(path, **kwargs):
+        analyzed.append(kwargs)
+        return _analysis(Path(path))
+
+    monkeypatch.setattr(cli, "analyze_archive", analyze)
     monkeypatch.setattr(cli, "verify_findings", lambda *_args, **_kwargs: ())
 
     assert cli.main([str(path) for path in archives]) == 0

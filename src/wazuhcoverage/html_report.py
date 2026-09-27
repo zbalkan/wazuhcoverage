@@ -7,6 +7,7 @@ import re
 from collections.abc import Sequence
 from datetime import datetime
 from html import escape
+from typing import TypedDict
 
 from wazuhcoverage.metrics import MetricSnapshot, MetricValue, calculate_metrics, resolve_effective_counts
 from wazuhcoverage.models import ArchiveAnalysis, Finding, Verification
@@ -733,18 +734,30 @@ def _render_findings_note(
     )
 
 
-def _contributors(snapshot: MetricSnapshot, metric: str) -> list[dict[str, object]]:
+class ContributorRow(TypedDict):
+    name: str
+    value: float
+    events: int
+    local_rate: float | None
+
+
+def _contributors(
+    snapshot: MetricSnapshot,
+    metric: str,
+) -> list[ContributorRow]:
     attributes = {
         "decoder_failure": ("decoder_failure_rate", "decoder_failure_contribution"),
         "uncovered": ("uncovered_rate", "uncovered_contribution"),
         "below_threshold": ("below_threshold_rate", "below_threshold_contribution"),
     }
+
     local_name, contribution_name = attributes[metric]
-    rows = []
+    rows: list[ContributorRow] = []
 
     for item in snapshot.log_types:
         local = getattr(item, local_name)
         contribution = getattr(item, contribution_name)
+
         if (
             not local.available
             or local.count is None
@@ -753,6 +766,7 @@ def _contributors(snapshot: MetricSnapshot, metric: str) -> list[dict[str, objec
             or contribution.ratio is None
         ):
             continue
+
         rows.append(
             {
                 "name": item.log_type or "(none)",
@@ -762,26 +776,47 @@ def _contributors(snapshot: MetricSnapshot, metric: str) -> list[dict[str, objec
             }
         )
 
-    rows.sort(key=lambda row: (-float(row["value"]), -int(row["events"]), str(row["name"])))
+    rows.sort(
+        key=lambda row: (
+            -row["value"],
+            -row["events"],
+            row["name"],
+        )
+    )
     return rows[:10]
+
+
+class ChartLogTypeRow(TypedDict):
+    name: str
+    total: int
+    Processed: int
+    Suppressed: int
+    Dropped: int
+    Unresolved: int
 
 
 def _chart_log_types(
     log_types: dict[str | None, dict[str, int]],
     *,
     resolved: bool,
-) -> list[dict[str, object]]:
-    rows = []
+) -> list[ChartLogTypeRow]:
+    rows: list[ChartLogTypeRow] = []
+
     for log_type, statuses in log_types.items():
         outcomes = outcome_counts(statuses, resolved=resolved)
+
         rows.append(
             {
                 "name": log_type or "(none)",
-                **outcomes,
+                "Processed": outcomes.get("Processed", 0),
+                "Suppressed": outcomes.get("Suppressed", 0),
+                "Dropped": outcomes.get("Dropped", 0),
+                "Unresolved": outcomes.get("Unresolved", 0),
                 "total": sum(outcomes.values()),
             }
         )
-    rows.sort(key=lambda item: (-int(item["total"]), str(item["name"])))
+
+    rows.sort(key=lambda item: (-item["total"], item["name"]))
     return rows[:20]
 
 

@@ -37,10 +37,10 @@ _DROPPED_PERCENT_WIDTH = 12
 # One column per outcome, then the breakdown of the dropped one. The two
 # aggregates come first so a row can be read for coverage alone; the three
 # that follow say why the dropped share was dropped and sum back to it.
-_LOG_TYPE_COLUMNS: tuple[Literal["Processed"], Literal["Dropped"], str, ...] = (
+_LOG_TYPE_COLUMNS: tuple[Literal["Processed"], Literal["Dropped"], str, ...] = (  # type: ignore
     _PROCESSED_LABEL,
     _DROPPED_LABEL,
-) + DROPPED_STATUSES  # type: ignore
+) + DROPPED_STATUSES
 _LOG_TYPE_COLUMN_WIDTHS = {column: max(12, len(column) + 2) for column in _LOG_TYPE_COLUMNS}
 # The one bucket whose meaning the archive underdetermines; see
 # wazuhcoverage.models.STATUSES for why.

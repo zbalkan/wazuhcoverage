@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from wazuhcoverage import ArchiveAnalysis, Finding, LogTypeCount, StatusCount, Verification
+from wazuhcoverage import ArchiveAnalysis, Finding, LogTypeCount, StatusCount, Verification  # type: ignore
 from wazuhcoverage.report import render_report
 
 

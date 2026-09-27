@@ -8,7 +8,7 @@ import json
 import os
 import struct
 import tempfile
-from collections.abc import Generator, Iterator
+from collections.abc import Generator, Iterable, Iterator
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, BinaryIO
@@ -17,8 +17,8 @@ from wazuhcoverage.models import STATUSES, ArchiveAnalysis, Finding, LogTypeCoun
 from wazuhcoverage.preprocessing import install_preprocessor
 
 try:
-    from drain3 import TemplateMiner
-    from drain3.template_miner_config import TemplateMinerConfig
+    from drain3 import TemplateMiner  # type: ignore
+    from drain3.template_miner_config import TemplateMinerConfig  # type: ignore
 
     from wazuhcoverage._drain import IndexedDrain
 except ImportError as exc:  # pragma: no cover - installation error path
@@ -137,13 +137,13 @@ def _build_template_miner() -> TemplateMiner:
     # No persistence handler: mined state is per-archive and stays in memory,
     # which is what lets a run leave nothing on disk behind it.
     miner = TemplateMiner(config=config)
-    miner.drain = IndexedDrain(
+    miner.drain = IndexedDrain(  # type: ignore
         sim_th=config.drain_sim_th,
         depth=config.drain_depth,
         max_children=config.drain_max_children,
         max_clusters=config.drain_max_clusters,
         extra_delimiters=config.drain_extra_delimiters,
-        profiler=miner.profiler,
+        profiler=miner.profiler,  # type: ignore
         param_str=config.mask_prefix + "*" + config.mask_suffix,
         parametrize_numeric_tokens=config.parametrize_numeric_tokens,
     )
@@ -530,7 +530,7 @@ def _mine(connection: DuckDBPyConnection, miner: TemplateMiner, work: str) -> in
     return mined
 
 
-def _sorted_messages(connection: DuckDBPyConnection, work: str, stack: ExitStack) -> Iterator[tuple[str, int, int]]:
+def _sorted_messages(connection: DuckDBPyConnection, work: str, stack: ExitStack) -> Iterable[tuple[str, int, int]]:
     """Yield every distinct message once, as ``(text, hi, lo)``, in sorted order.
 
     The messages are read in chunks of consecutive events holding at most

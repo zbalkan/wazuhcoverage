@@ -12,7 +12,7 @@ from types import SimpleNamespace
 import pytest
 from pytest import MonkeyPatch
 
-from wazuhcoverage import ArchiveAnalysis, Finding, verify_findings
+from wazuhcoverage import ArchiveAnalysis, Finding, verify_findings  # type: ignore
 from wazuhcoverage import verification as verification_module
 
 

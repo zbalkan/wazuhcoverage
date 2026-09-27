@@ -17,7 +17,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any, TextIO, TypeVar, overload
 
-from wazuhcoverage import __version__
+from wazuhcoverage import __version__  # type: ignore
 from wazuhcoverage.analysis import DEFAULT_ALERT_THRESHOLD, analyze_archive
 from wazuhcoverage.config import DEFAULT_OSSEC_CONF, read_alert_threshold
 from wazuhcoverage.html_report import render_html_report

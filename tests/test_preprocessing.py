@@ -27,10 +27,12 @@ def test_timestamp_prefixes_are_replaced_before_mining(timestamp: str) -> None:
     connection = duckdb.connect()
     try:
         install_preprocessor(connection)
-        value = connection.execute(
+        row = connection.execute(
             "SELECT preprocess_log(?)",
             [f"{timestamp} daemon: action"],
-        ).fetchone()[0]
+        ).fetchone()
+        assert row is not None
+        value = row[0]
     finally:
         connection.close()
 
@@ -41,10 +43,12 @@ def test_embedded_timestamp_is_not_replaced() -> None:
     connection = duckdb.connect()
     try:
         install_preprocessor(connection)
-        value = connection.execute(
+        row = connection.execute(
             "SELECT preprocess_log(?)",
             ["certificate expires 2027-01-01 00:00:00"],
-        ).fetchone()[0]
+        ).fetchone()
+        assert row is not None
+        value = row[0]
     finally:
         connection.close()
 
@@ -55,10 +59,12 @@ def test_existing_conservative_value_masks_are_preserved() -> None:
     connection = duckdb.connect()
     try:
         install_preprocessor(connection)
-        value = connection.execute(
+        row = connection.execute(
             "SELECT preprocess_log(?)",
             ["id=12345 uuid=123e4567-e89b-12d3-a456-426614174000 hash=0123456789abcdef"],
-        ).fetchone()[0]
+        ).fetchone()
+        assert row is not None
+        value = row[0]
     finally:
         connection.close()
 

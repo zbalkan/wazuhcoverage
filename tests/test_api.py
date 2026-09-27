@@ -4,16 +4,16 @@ import pytest
 
 import wazuhcoverage
 from wazuhcoverage import (
-    ArchiveAnalysis,
-    Finding,
-    LogTypeCount,
-    LogTypeMetrics,
-    MetricSnapshot,
-    MetricValue,
-    StatusCount,
-    analyze_archive,
-    calculate_metrics,
-    metrics_to_dict,
+    ArchiveAnalysis,  # type: ignore
+    Finding,  # type: ignore
+    LogTypeCount,  # type: ignore
+    LogTypeMetrics,  # type: ignore
+    MetricSnapshot,  # type: ignore
+    MetricValue,  # type: ignore
+    StatusCount,  # type: ignore
+    analyze_archive,  # type: ignore
+    calculate_metrics,  # type: ignore
+    metrics_to_dict,  # type: ignore
 )
 
 
@@ -21,8 +21,8 @@ def test_public_api_is_available_from_package() -> None:
     assert callable(analyze_archive)
     assert callable(calculate_metrics)
     assert callable(metrics_to_dict)
-    assert wazuhcoverage.DEFAULT_ALERT_THRESHOLD == 3
-    assert wazuhcoverage.__version__ == "0.9.0"
+    assert wazuhcoverage.DEFAULT_ALERT_THRESHOLD == 3  # type: ignore
+    assert wazuhcoverage.__version__ == "0.9.0"  # type: ignore
     assert ArchiveAnalysis.__module__ == "wazuhcoverage.models"
     assert Finding.__module__ == "wazuhcoverage.models"
     assert LogTypeCount.__module__ == "wazuhcoverage.models"
