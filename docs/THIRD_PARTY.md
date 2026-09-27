@@ -10,6 +10,7 @@ The base installation has these direct runtime dependencies:
 | --- | --- | --- | --- |
 | [DuckDB](https://duckdb.org/) | Reading and aggregating Wazuh JSON archives | MIT | [DuckDB license](https://github.com/duckdb/duckdb/blob/main/LICENSE) |
 | [Drain3](https://github.com/IBM/Drain3) | Mining message templates used to group findings | MIT | [Drain3 license](https://github.com/IBM/Drain3/blob/master/LICENSE) |
+| [wazuhtester](https://github.com/zbalkan/wazuhtester) | Replaying representative findings through the local Wazuh logtest daemon | GPL-2.0 | [wazuhtester license](https://github.com/zbalkan/wazuhtester/blob/main/LICENSE) |
 
 Drain3 is the dependency used by this project; it is an implementation of the
 Drain log-parsing algorithm. It should not be confused with a package named

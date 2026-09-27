@@ -252,21 +252,6 @@ def test_a_negative_threshold_is_rejected() -> None:
         verify_findings(_analysis(_finding("k")), alert_threshold=-1)
 
 
-def test_a_missing_library_names_the_extra(monkeypatch: MonkeyPatch) -> None:
-    import builtins
-
-    real_import = builtins.__import__
-
-    def refuse(name, *args, **kwargs):
-        if name == "wazuhtester":
-            raise ImportError("No module named 'wazuhtester'")
-        return real_import(name, *args, **kwargs)
-
-    monkeypatch.setattr(builtins, "__import__", refuse)
-
-    with pytest.raises(RuntimeError, match=r"wazuhcoverage\[logtest\]"):
-        verify_findings(_analysis(_finding("k")))
-
 
 def test_the_probe_is_silent_when_a_replay_is_possible(monkeypatch: MonkeyPatch) -> None:
     _install(monkeypatch, _FakeTester(_response("NoRule")))
@@ -283,16 +268,6 @@ def test_the_probe_names_an_unanswering_socket(monkeypatch: MonkeyPatch) -> None
     assert "/tmp/nope.sock" in reason
 
 
-def test_the_probe_reports_a_missing_library_instead_of_raising(monkeypatch: MonkeyPatch) -> None:
-    # A best-effort caller needs a sentence to print, not an exception to
-    # catch: not having Wazuh on the machine is not an error in the archive.
-    def refuse() -> None:
-        raise RuntimeError("wazuhtester is not installed, so findings cannot be replayed.")
-
-    monkeypatch.setattr(verification_module, "_load_wazuhtester", refuse)
-
-    assert verification_module.unavailable_reason() == "wazuhtester is not installed, so findings cannot be replayed."
-
 
 def test_a_half_removed_install_is_a_reason_not_a_crash(monkeypatch: MonkeyPatch) -> None:
     # pip uninstall can leave an empty wazuhtester directory behind, and Python
@@ -308,7 +283,7 @@ def test_a_half_removed_install_is_a_reason_not_a_crash(monkeypatch: MonkeyPatch
 
     assert reason is not None
     assert "is_logtest_available" in reason
-    assert "not a usable install" in reason
+    assert "pip install --force-reinstall wazuhcoverage" in reason
 
 
 def test_a_probe_that_raises_still_returns_a_reason(monkeypatch: MonkeyPatch) -> None:

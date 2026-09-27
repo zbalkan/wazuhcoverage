@@ -29,7 +29,7 @@ from __future__ import annotations
 import random
 import re
 from collections import Counter, defaultdict
-from typing import Callable, Optional
+from collections.abc import Callable
 
 from drain3 import TemplateMiner
 from drain3.template_miner_config import TemplateMinerConfig
@@ -129,7 +129,7 @@ def evaluate(
     *,
     sim_th: float,
     depth: int,
-    max_clusters: Optional[int] = None,
+    max_clusters: int | None = None,
     parametrize_numeric_tokens: bool = True,
 ) -> dict:
     config = TemplateMinerConfig()

@@ -5,7 +5,6 @@ from __future__ import annotations
 import math
 from collections import defaultdict
 from collections.abc import Sequence
-from typing import Optional
 
 from drain3.drain import Drain, LogClusterCache, Node
 
@@ -21,7 +20,6 @@ class _IndexedLogClusterCache(LogClusterCache):
         cluster_id, cluster = super().popitem()
         self._drain._remove_indexed_template(cluster_id)
         return cluster_id, cluster
-
 
 class IndexedDrain(Drain):
     """Drain with an exact positional-token candidate index.
@@ -57,7 +55,7 @@ class IndexedDrain(Drain):
                 leaf.cluster_ids[:] = [candidate for candidate in leaf.cluster_ids if candidate in self.id_to_cluster]
                 self._stale_per_leaf[leaf_key] = 0
 
-    def _remove_postings(self, cluster_id: int, tokens: Optional[tuple[str, ...]]) -> None:
+    def _remove_postings(self, cluster_id: int, tokens: tuple[str, ...] | None) -> None:
         if tokens is None:
             return
         for position, token in enumerate(tokens):

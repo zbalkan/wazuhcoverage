@@ -1,5 +1,13 @@
 """Public API for Wazuh archive coverage analysis."""
 
+import sys
+
+if sys.platform != "linux":
+    raise RuntimeError(
+        "wazuhcoverage supports Linux only because it replays findings "
+        "through the local Wazuh wazuh-logtest Unix socket."
+    )
+
 from .analysis import DEFAULT_ALERT_THRESHOLD, analyze_archive
 from .metrics import LogTypeMetrics, MetricSnapshot, MetricValue, calculate_metrics, metrics_to_dict
 from .models import (
@@ -35,4 +43,4 @@ __all__ = [
     "verify_findings",
 ]
 
-__version__ = "0.8.2"
+__version__ = "0.9.0"

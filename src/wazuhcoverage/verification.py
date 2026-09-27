@@ -12,8 +12,8 @@ bucket into an answer, at the cost of needing a reachable Wazuh manager.
 
 This module is the only part of wazuhcoverage that talks to anything outside
 the archive file. ``analyze_archive`` stays offline and unchanged; verification
-is a separate call, and ``wazuhtester`` is an optional dependency so the
-package still installs where no manager exists.
+is a separate call. ``wazuhtester`` is a runtime dependency. The Wazuh daemon
+may still be absent or unreachable, which is why availability is probed.
 
 Two callers with different needs are served deliberately differently.
 ``verify_findings`` is explicit: asked to replay, it raises rather than quietly
@@ -24,7 +24,7 @@ can say why it cannot and carry on reading the archive.
 
 from __future__ import annotations
 
-from typing import Any, Optional, Union
+from typing import Any
 
 from wazuhcoverage.analysis import DEFAULT_ALERT_THRESHOLD
 from wazuhcoverage.models import ArchiveAnalysis, Finding, Verification
@@ -58,33 +58,25 @@ def _load_wazuhtester() -> Any:
     except ImportError as exc:
         raise RuntimeError(
             "wazuhtester is not installed, so findings cannot be replayed. "
-            "Install it with: pip install 'wazuhcoverage[logtest]' "
-            "(Linux, Python 3.10 or newer, with a running Wazuh manager)"
+            "Run `pip install --force-reinstall wazuhcoverage` to restore its runtime dependencies."
         ) from exc
-    except RuntimeError as exc:
-        # wazuhtester refuses to import off Linux, where the logtest socket
-        # cannot exist. That is a fact about the machine, not a fault.
-        raise RuntimeError(f"wazuhtester cannot run on this platform: {exc}") from exc
-
     missing = [name for name in _REQUIRED_ATTRIBUTES if not hasattr(wazuhtester, name)]
     if missing:
         where = getattr(wazuhtester, "__file__", None) or "a namespace package with no module file"
         raise RuntimeError(
             f"the wazuhtester importable from {where} is missing {', '.join(missing)}, "
-            "so it is not a usable install. Reinstall it with: "
-            "pip install --force-reinstall 'wazuhcoverage[logtest]'"
+            "so it is not a usable install. Run `pip install --force-reinstall wazuhcoverage`."
         )
 
     return wazuhtester
 
 
-def unavailable_reason(socket_path: Optional[str] = None) -> Optional[str]:
+def unavailable_reason(socket_path: str | None = None) -> str | None:
     """Return None when replay is possible here, or a short reason why not.
 
-    Three things can stop a replay, and a caller that means to continue without
-    one needs to tell a user which: the library is not installed, the platform
-    cannot run it, or the daemon is not answering. None of them is an error in
-    the archive, so none of them raises.
+    Replay can be unavailable because the socket is not present, not answering,
+    or not permitted. None of those conditions is an error in the archive, so
+    this probe reports the reason instead of raising.
     """
 
     try:
@@ -107,7 +99,7 @@ def verify_findings(
     alert_threshold: int = DEFAULT_ALERT_THRESHOLD,
     statuses: tuple[str, ...] = DEFAULT_VERIFIED_STATUSES,
     log_format: str = DEFAULT_LOG_FORMAT,
-    socket_path: Optional[str] = None,
+    socket_path: str | None = None,
 ) -> tuple[Verification, ...]:
     """Replay each selected finding's sample and report its effective state.
 
@@ -164,7 +156,7 @@ def _verify_one(
     *,
     alert_threshold: int,
     log_format: str,
-    socket_path: Optional[str],
+    socket_path: str | None,
 ) -> Verification:
     try:
         response = wazuhtester.send_log(
@@ -222,7 +214,7 @@ def _unverified(
     finding: Finding,
     error: str,
     *,
-    status: Optional[str] = None,
+    status: str | None = None,
     response: Any = None,
 ) -> Verification:
     return Verification(
@@ -238,7 +230,7 @@ def _unverified(
     )
 
 
-def _level(value: Union[int, str, None]) -> Optional[int]:
+def _level(value: int | str | None) -> int | None:
     """Coerce a rule level to an int, or None when it is not one.
 
     The daemon sends a number, but the field is read straight out of a JSON
@@ -254,5 +246,5 @@ def _level(value: Union[int, str, None]) -> Optional[int]:
         return None
 
 
-def _string_or_none(value: Any) -> Optional[str]:
+def _string_or_none(value: Any) -> str | None:
     return None if value is None else str(value)

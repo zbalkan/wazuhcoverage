@@ -1,6 +1,6 @@
 # Metrics
 
-`wazuhcoverage` derives reliability and efficiency measurements from the same archive analysis and optional replay results used by the report. Metrics do not rescan the archive and do not change event classification.
+`wazuhcoverage` derives reliability and efficiency measurements from the same archive analysis the report uses and, when available, its replay results. Metrics do not rescan the archive and do not change event classification.
 
 The measurement boundary starts at the Wazuh JSON archive. These metrics cannot measure telemetry that was never generated, collected, transported, or written to the archive.
 

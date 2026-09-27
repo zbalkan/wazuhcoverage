@@ -580,8 +580,8 @@ def test_a_reachable_daemon_is_used_without_being_asked(
 
 
 def test_an_unusable_daemon_warns_once_and_keeps_going(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys) -> None:
-    # The whole point of best effort: a laptop with no Wazuh on it still gets
-    # its coverage report, and is told what the report cannot answer.
+    # A missing local manager still gets an archive-only coverage report, with
+    # the socket problem stated once before processing begins.
     first = tmp_path / "a.json.gz"
     second = tmp_path / "b.json.gz"
     first.touch()
@@ -590,7 +590,7 @@ def test_an_unusable_daemon_warns_once_and_keeps_going(monkeypatch: pytest.Monke
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(cli, "resolve_targets", lambda _targets: [first, second])
     monkeypatch.setattr(cli, "analyze_archive", lambda path, **_kwargs: _analysis(Path(path)))
-    monkeypatch.setattr(cli, "unavailable_reason", lambda: "wazuhtester is not installed")
+    monkeypatch.setattr(cli, "unavailable_reason", lambda: "the wazuh-logtest socket at /var/ossec/queue/sockets/logtest is not answering")
     monkeypatch.setattr(cli, "verify_findings", lambda *_args, **_kwargs: pytest.fail("must not replay"))
     monkeypatch.setattr(cli, "render_report", lambda _analysis, _verifications=(), **_kwargs: "report\n")
 
@@ -598,8 +598,8 @@ def test_an_unusable_daemon_warns_once_and_keeps_going(monkeypatch: pytest.Monke
 
     captured = capsys.readouterr()
     assert captured.out == "report\nreport\n"
-    assert captured.err.count("reporting from the archive alone") == 1
-    assert "wazuhtester is not installed" in captured.err
+    assert captured.err.count("producing an archive-only report") == 1
+    assert "wazuh-logtest socket" in captured.err
     assert "docs/CAVEATS.md" in captured.err
     assert "Processed: 2 | Failed: 0" in captured.err
 
