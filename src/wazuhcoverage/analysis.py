@@ -26,12 +26,12 @@ except ImportError as exc:  # pragma: no cover - installation error path
 
 try:
     import duckdb
+
     if TYPE_CHECKING:
         from duckdb import DuckDBPyConnection
 
 except ImportError as exc:  # pragma: no cover - installation error path
-    raise RuntimeError(
-        "DuckDB is required. Install wazuhcoverage with its dependencies.") from exc
+    raise RuntimeError("DuckDB is required. Install wazuhcoverage with its dependencies.") from exc
 
 DEFAULT_ALERT_THRESHOLD = 3
 

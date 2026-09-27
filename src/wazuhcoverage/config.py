@@ -10,9 +10,8 @@ MIN_ALERT_THRESHOLD = 1
 MAX_ALERT_THRESHOLD = 16
 
 _COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
-_LOG_ALERT_LEVEL_RE = re.compile(
-    r"<log_alert_level>\s*([^<]*?)\s*</log_alert_level>"
-)
+_LOG_ALERT_LEVEL_RE = re.compile(r"<log_alert_level>\s*([^<]*?)\s*</log_alert_level>")
+
 
 def read_alert_threshold(path: str | Path = DEFAULT_OSSEC_CONF) -> int | None:
     """Return log_alert_level from ossec.conf, or None when it is not set.
@@ -38,8 +37,6 @@ def read_alert_threshold(path: str | Path = DEFAULT_OSSEC_CONF) -> int | None:
         raise ValueError("log_alert_level must be an integer") from exc
 
     if not MIN_ALERT_THRESHOLD <= value <= MAX_ALERT_THRESHOLD:
-        raise ValueError(
-            f"log_alert_level must be between {MIN_ALERT_THRESHOLD} and {MAX_ALERT_THRESHOLD}"
-        )
+        raise ValueError(f"log_alert_level must be between {MIN_ALERT_THRESHOLD} and {MAX_ALERT_THRESHOLD}")
 
     return value

@@ -143,11 +143,7 @@ def resolve_effective_counts(
         old_counts = log_types.setdefault(finding.log_type, {})
         old_counts[old] = old_counts.get(old, 0) - count
 
-        effective_log_type = (
-            (verification.decoder or finding.log_type)
-            if new != "unverified"
-            else finding.log_type
-        )
+        effective_log_type = (verification.decoder or finding.log_type) if new != "unverified" else finding.log_type
         new_counts = log_types.setdefault(effective_log_type, {})
         new_counts[new] = new_counts.get(new, 0) + count
 
@@ -193,17 +189,11 @@ def _replay_complete(
     # With no replay, zero rule-less decoded events is already a complete
     # statement: every decoded event has an observed rule outcome.
     if not verifications:
-        has_ruleless_finding = any(
-            finding.observed_status == "no_alerting_rule" for finding in analysis.findings
-        )
+        has_ruleless_finding = any(finding.observed_status == "no_alerting_rule" for finding in analysis.findings)
         return no_alerting_rule == 0 and not has_ruleless_finding
 
     required_events = sum(observed.get(status, 0) for status in _REPLAYABLE_STATUSES)
-    targets = [
-        finding
-        for finding in analysis.findings
-        if finding.observed_status in _REPLAYABLE_STATUSES
-    ]
+    targets = [finding for finding in analysis.findings if finding.observed_status in _REPLAYABLE_STATUSES]
     if sum(finding.event_count for finding in targets) != required_events:
         return False
 

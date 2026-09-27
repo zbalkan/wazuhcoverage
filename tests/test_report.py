@@ -61,14 +61,14 @@ def _rendered_log_type_rows(analysis: ArchiveAnalysis) -> list[str]:
     lines = render_report(analysis).splitlines()
     header = next(index for index, line in enumerate(lines) if line.startswith("Log type") and "Processed" in line)
     end = lines.index("", header + 1)
-    return lines[header + 1: end]
+    return lines[header + 1 : end]
 
 
 def _rendered_outcome_rows(analysis: ArchiveAnalysis) -> list[str]:
     lines = render_report(analysis).splitlines()
     header = next(index for index, line in enumerate(lines) if line.startswith("Outcome") and "% dropped" in line)
     end = lines.index("", header + 1)
-    return lines[header + 1: end]
+    return lines[header + 1 : end]
 
 
 def test_report_renders_outcome_and_log_type_tables() -> None:
@@ -304,16 +304,25 @@ def _verified_analysis() -> ArchiveAnalysis:
         ),
         log_type_counts=(
             LogTypeCount(
-                status="at_or_above_threshold", log_type="sshd",
-                event_count=3, percentage=300 / 53, status_percentage=100.0,
+                status="at_or_above_threshold",
+                log_type="sshd",
+                event_count=3,
+                percentage=300 / 53,
+                status_percentage=100.0,
             ),
             LogTypeCount(
-                status="no_alerting_rule", log_type="sshd",
-                event_count=10, percentage=1000 / 53, status_percentage=20.0,
+                status="no_alerting_rule",
+                log_type="sshd",
+                event_count=10,
+                percentage=1000 / 53,
+                status_percentage=20.0,
             ),
             LogTypeCount(
-                status="no_alerting_rule", log_type="windows_eventchannel",
-                event_count=40, percentage=4000 / 53, status_percentage=80.0,
+                status="no_alerting_rule",
+                log_type="windows_eventchannel",
+                event_count=40,
+                percentage=4000 / 53,
+                status_percentage=80.0,
             ),
         ),
         findings=(
@@ -403,7 +412,7 @@ def test_the_effective_table_weights_states_by_events() -> None:
     # same coverage statement, so the table counts events as well as findings.
     lines = render_report(_verified_analysis(), _verifications()).splitlines()
     header = lines.index("Effective coverage (wazuh-logtest)")
-    rows = [line.split() for line in lines[header + 3: header + 5]]
+    rows = [line.split() for line in lines[header + 3 : header + 5]]
 
     assert rows[0] == ["uncovered", "1", "10", "20.00%"]
     assert rows[1] == ["suppressed", "1", "40", "80.00%"]
@@ -413,7 +422,7 @@ def test_replayed_summary_separates_suppressed_from_dropped() -> None:
     text = render_report(_verified_analysis(), _verifications())
     lines = text.splitlines()
     start = lines.index("Outcome (with replay)")
-    rows = [line.split() for line in lines[start + 3:start + 11]]
+    rows = [line.split() for line in lines[start + 3 : start + 11]]
 
     assert rows == [
         ["Processed", "3", "5.66%", "-"],
@@ -427,7 +436,7 @@ def test_replayed_summary_separates_suppressed_from_dropped() -> None:
     ]
     assert sum(int(rows[index][1]) for index in (0, 1, 4, 7)) == 53
     start = lines.index("Log types (with replay)")
-    log_types = [line.split() for line in lines[start + 3:start + 5]]
+    log_types = [line.split() for line in lines[start + 3 : start + 5]]
     assert log_types == [
         ["windows_eventchannel", "40", "75.47%", "0", "40", "0", "0"],
         ["sshd", "13", "24.53%", "3", "0", "10", "0"],
@@ -443,7 +452,7 @@ def test_replay_decoder_replaces_archive_decoder_and_log_type() -> None:
     assert "    Decoder: windows_eventchannel\n" not in suppressed
     lines = text.splitlines()
     start = lines.index("Log types (with replay)")
-    log_types = [line.split() for line in lines[start + 3:start + 5]]
+    log_types = [line.split() for line in lines[start + 3 : start + 5]]
     assert log_types == [
         ["auditd", "40", "75.47%", "0", "40", "0", "0"],
         ["sshd", "13", "24.53%", "3", "0", "10", "0"],
@@ -453,9 +462,12 @@ def test_replay_decoder_replaces_archive_decoder_and_log_type() -> None:
 def test_findings_sort_by_event_count_within_each_outcome() -> None:
     base = _verified_analysis()
     smaller_processed = replace(
-        base.findings[1], finding_key="processed-small",
-        observed_status="at_or_above_threshold", event_count=3,
-        observed_rule_id="321", observed_rule_level=5,
+        base.findings[1],
+        finding_key="processed-small",
+        observed_status="at_or_above_threshold",
+        event_count=3,
+        observed_rule_id="321",
+        observed_rule_level=5,
     )
     text = render_report(replace(base, findings=base.findings + (smaller_processed,)), _verifications())
     processed = text.split("\nProcessed\n---------\n", 1)[1]

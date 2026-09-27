@@ -146,7 +146,6 @@ def test_json_output_uses_replay_adjusted_metrics(
     assert payload["uncovered"]["rate"] == pytest.approx(0.2)
 
 
-
 def test_html_flag_is_an_output_mode_and_excludes_json_and_no_stats() -> None:
     parser = cli.build_parser()
 
@@ -221,7 +220,6 @@ def test_html_output_refuses_to_overwrite_input_archive(
     captured = capsys.readouterr()
     assert captured.out == ""
     assert "must not overwrite the input archive" in captured.err
-
 
 
 def test_html_output_refuses_hard_link_to_input_archive(

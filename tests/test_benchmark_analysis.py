@@ -7,15 +7,13 @@ from pathlib import Path
 def test_benchmark_cases_exercise_expected_end_to_end_shapes() -> None:
     repository = Path(__file__).resolve().parents[1]
     completed = subprocess.run(
-        [sys.executable, str(repository / "tools" /
-                             "benchmark_analysis.py"), "--events", "100"],
+        [sys.executable, str(repository / "tools" / "benchmark_analysis.py"), "--events", "100"],
         cwd=repository,
         check=True,
         capture_output=True,
         text=True,
     )
-    results = {result["case"]: result for result in map(
-        json.loads, completed.stdout.splitlines())}
+    results = {result["case"]: result for result in map(json.loads, completed.stdout.splitlines())}
 
     assert set(results) == {"realistic", "unique"}
     assert results["realistic"]["events"] == 100

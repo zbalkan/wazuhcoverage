@@ -486,6 +486,7 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
 </html>
 """
 
+
 def render_html_report(
     analysis: ArchiveAnalysis,
     verifications: Sequence[Verification] = (),
@@ -500,10 +501,7 @@ def render_html_report(
     resolved = bool(verifications)
     outcomes = outcome_counts(statuses, resolved=resolved)
     chart_data = {
-        "outcomes": [
-            {"name": name, "value": count}
-            for name, count in outcomes.items()
-        ],
+        "outcomes": [{"name": name, "value": count} for name, count in outcomes.items()],
         "outcome_names": list(outcomes),
         "contributors": {
             "decoder_failure": _contributors(snapshot, "decoder_failure"),
@@ -536,6 +534,7 @@ def render_html_report(
         _HTML_TEMPLATE,
     )
 
+
 def _render_metric_cards(snapshot: MetricSnapshot) -> str:
     metrics = (
         ("Malformed input", snapshot.malformed_rate),
@@ -545,6 +544,7 @@ def _render_metric_cards(snapshot: MetricSnapshot) -> str:
         ("Unresolved", snapshot.uncertainty_rate),
     )
     return "\n".join(_render_metric_card(label, metric) for label, metric in metrics)
+
 
 def _render_metric_card(label: str, metric: MetricValue) -> str:
     if not metric.available:
@@ -565,6 +565,7 @@ def _render_metric_card(label: str, metric: MetricValue) -> str:
         "</article>"
     )
 
+
 def _render_outcome_table(outcomes: dict[str, int], total: int) -> str:
     rows = []
     for name, count in outcomes.items():
@@ -577,11 +578,10 @@ def _render_outcome_table(outcomes: dict[str, int], total: int) -> str:
         )
     return (
         "<figure><table><thead><tr>"
-        "<th>Outcome</th><th class=\"numeric\">Events</th><th class=\"numeric\">Share</th>"
-        "</tr></thead><tbody>"
-        + "".join(rows)
-        + "</tbody></table></figure>"
+        '<th>Outcome</th><th class="numeric">Events</th><th class="numeric">Share</th>'
+        "</tr></thead><tbody>" + "".join(rows) + "</tbody></table></figure>"
     )
+
 
 def _render_log_type_table(snapshot: MetricSnapshot) -> str:
     rows = []
@@ -601,17 +601,16 @@ def _render_log_type_table(snapshot: MetricSnapshot) -> str:
     return (
         "<figure><table><thead><tr>"
         "<th>Log type</th>"
-        "<th class=\"numeric\">Events</th>"
-        "<th class=\"numeric\">Decoder failure</th>"
-        "<th class=\"numeric\">Decoder contribution</th>"
-        "<th class=\"numeric\">Uncovered</th>"
-        "<th class=\"numeric\">Uncovered contribution</th>"
-        "<th class=\"numeric\">Below threshold</th>"
-        "<th class=\"numeric\">Below-threshold contribution</th>"
-        "</tr></thead><tbody>"
-        + "".join(rows)
-        + "</tbody></table></figure>"
+        '<th class="numeric">Events</th>'
+        '<th class="numeric">Decoder failure</th>'
+        '<th class="numeric">Decoder contribution</th>'
+        '<th class="numeric">Uncovered</th>'
+        '<th class="numeric">Uncovered contribution</th>'
+        '<th class="numeric">Below threshold</th>'
+        '<th class="numeric">Below-threshold contribution</th>'
+        "</tr></thead><tbody>" + "".join(rows) + "</tbody></table></figure>"
     )
+
 
 def _render_log_type_outcome_table(
     log_types: dict[str | None, dict[str, int]],
@@ -629,32 +628,23 @@ def _render_log_type_outcome_table(
         if not total:
             continue
         cells = "".join(f'<td class="numeric">{outcomes[name]:,}</td>' for name in names)
-        rows.append(
-            "<tr>"
-            f"<td>{escape(log_type or '(none)')}</td>"
-            f'<td class="numeric">{total:,}</td>'
-            f"{cells}"
-            "</tr>"
-        )
+        rows.append(f'<tr><td>{escape(log_type or "(none)")}</td><td class="numeric">{total:,}</td>{cells}</tr>')
 
     headings = "".join(f'<th class="numeric">{escape(name)}</th>' for name in names)
     return (
         "<figure><table><thead><tr>"
-        "<th>Log type</th><th class=\"numeric\">Events</th>"
+        '<th>Log type</th><th class="numeric">Events</th>'
         f"{headings}"
-        "</tr></thead><tbody>"
-        + "".join(rows)
-        + "</tbody></table></figure>"
+        "</tr></thead><tbody>" + "".join(rows) + "</tbody></table></figure>"
     )
+
 
 def _render_findings(
     analysis: ArchiveAnalysis,
     verifications: Sequence[Verification],
 ) -> str:
     by_key = {item.finding_key: item for item in verifications}
-    grouped: dict[str, list[tuple[Finding, Verification | None]]] = {
-        group: [] for group in FINDING_GROUPS
-    }
+    grouped: dict[str, list[tuple[Finding, Verification | None]]] = {group: [] for group in FINDING_GROUPS}
 
     for finding in analysis.findings:
         verification = by_key.get(finding.finding_key)
@@ -673,6 +663,7 @@ def _render_findings(
         return "<p>No findings.</p>"
     return "".join(sections)
 
+
 def _render_finding(finding: Finding, verification: Verification | None) -> str:
     presented = present_finding(finding, verification)
 
@@ -690,10 +681,7 @@ def _render_finding(finding: Finding, verification: Verification | None) -> str:
         ("Replay error", presented.replay_error),
     )
     rows = "".join(
-        "<tr>"
-        f"<th>{escape(label)}</th>"
-        f"<td>{escape(value) if value is not None else '—'}</td>"
-        "</tr>"
+        f"<tr><th>{escape(label)}</th><td>{escape(value) if value is not None else '—'}</td></tr>"
         for label, value in metadata
     )
 
@@ -709,8 +697,7 @@ def _render_finding(finding: Finding, verification: Verification | None) -> str:
     if finding.observed_status in ("no_decoder", "no_alerting_rule"):
         regex_type, regex = suggest_wazuh_regex(finding.message_pattern)
         regex_suggestion = (
-            f"<h4>Suggested Wazuh regex ({escape(regex_type)})</h4>"
-            f"<pre><code>{escape(regex)}</code></pre>"
+            f"<h4>Suggested Wazuh regex ({escape(regex_type)})</h4><pre><code>{escape(regex)}</code></pre>"
         )
 
     return (
@@ -725,13 +712,13 @@ def _render_finding(finding: Finding, verification: Verification | None) -> str:
         "</details>"
     )
 
+
 def _render_findings_note(
     analysis: ArchiveAnalysis,
     verifications: Sequence[Verification],
 ) -> str:
     if verifications or not any(
-        item.status == "no_alerting_rule" and item.event_count
-        for item in analysis.status_counts
+        item.status == "no_alerting_rule" and item.event_count for item in analysis.status_counts
     ):
         return ""
 
@@ -744,6 +731,7 @@ def _render_findings_note(
         "wazuh-logtest to distinguish those states.</p>"
         "</article>"
     )
+
 
 def _contributors(snapshot: MetricSnapshot, metric: str) -> list[dict[str, object]]:
     attributes = {
@@ -777,6 +765,7 @@ def _contributors(snapshot: MetricSnapshot, metric: str) -> list[dict[str, objec
     rows.sort(key=lambda row: (-float(row["value"]), -int(row["events"]), str(row["name"])))
     return rows[:10]
 
+
 def _chart_log_types(
     log_types: dict[str | None, dict[str, int]],
     *,
@@ -795,10 +784,12 @@ def _chart_log_types(
     rows.sort(key=lambda item: (-int(item["total"]), str(item["name"])))
     return rows[:20]
 
+
 def _percent(ratio: float | None, available: bool = True) -> str:
     if not available:
         return "Unavailable"
     return "n/a" if ratio is None else f"{ratio * 100:.2f}%"
+
 
 def _safe_json(value: object) -> str:
     return (

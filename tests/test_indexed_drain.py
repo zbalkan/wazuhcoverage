@@ -11,6 +11,7 @@ from wazuhcoverage._drain import IndexedDrain
 def _drain(drain_type: type[Drain], *, max_clusters: int | None = None) -> Drain:
     return drain_type(depth=4, sim_th=0.56, max_clusters=max_clusters, parametrize_numeric_tokens=True)
 
+
 def test_indexed_drain_matches_stock_drain_for_every_assignment() -> None:
     messages = sorted(
         {
@@ -35,6 +36,7 @@ def test_indexed_drain_matches_stock_drain_for_every_assignment() -> None:
             stock_change,
         )
 
+
 def test_indexed_drain_matches_stock_drain_through_eviction() -> None:
     messages = ["one", "two tokens", "three token message", "one", "four token message now"]
     stock = _drain(Drain, max_clusters=2)
@@ -51,15 +53,11 @@ def test_indexed_drain_matches_stock_drain_through_eviction() -> None:
 
     assert len(indexed._indexed_tokens) <= 2  # type: ignore[attr-defined]
 
+
 def test_indexed_drain_is_differentially_equivalent_on_generated_corpus() -> None:
     random.seed(20260922)
     vocabulary = ["alpha", "bravo", "charlie", "delta", "echo", "foxtrot", "host1", "host2", "port22"]
-    messages = sorted(
-        {
-            " ".join(random.choice(vocabulary) for _ in range(random.randint(3, 12)))
-            for _ in range(2_000)
-        }
-    )
+    messages = sorted({" ".join(random.choice(vocabulary) for _ in range(random.randint(3, 12))) for _ in range(2_000)})
     stock = _drain(Drain)
     indexed = _drain(IndexedDrain)
 
@@ -71,6 +69,7 @@ def test_indexed_drain_is_differentially_equivalent_on_generated_corpus() -> Non
             stock_cluster.get_template(),
             stock_change,
         )
+
 
 def test_index_avoids_pairwise_distance_scans_on_unique_messages(monkeypatch: MonkeyPatch) -> None:
     messages = ["<TIMESTAMP> " + " ".join(f"token{position}-{index}" for position in range(10)) for index in range(500)]
@@ -96,6 +95,7 @@ def test_index_avoids_pairwise_distance_scans_on_unique_messages(monkeypatch: Mo
 
     assert calls["stock"] == len(messages) * (len(messages) - 1) // 2
     assert calls["indexed"] == 0
+
 
 def test_empty_candidate_set_does_not_scan_the_prefix_leaf() -> None:
     class NoIterationList(list):

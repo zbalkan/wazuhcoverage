@@ -37,12 +37,15 @@ KNOWN_PINS = {
 _NAME = re.compile(r"^\s*([A-Za-z0-9._-]+)")
 _EXACT = re.compile(r"[=]{2,3}\s*[A-Za-z0-9][^,;\s]*")
 
+
 def _canonical(name: str) -> str:
     return re.sub(r"[-_.]+", "-", name).lower()
+
 
 def _requirement_name(requirement: str) -> str | None:
     match = _NAME.match(requirement)
     return _canonical(match.group(1)) if match else None
+
 
 def _requirements(distribution: str) -> list[str]:
     try:
@@ -54,6 +57,7 @@ def _requirements(distribution: str) -> list[str]:
     # Requirements guarded by an extra are not part of a default install, so an
     # exact pin behind one constrains nobody who simply installs the package.
     return [requirement for requirement in requires if "extra ==" not in requirement]
+
 
 def collect_pins() -> dict[tuple[str, str], str]:
     """Return {(requiring distribution, required distribution): requirement}."""
@@ -81,6 +85,7 @@ def collect_pins() -> dict[tuple[str, str], str]:
                 queue.append(name)
     return pins
 
+
 def main() -> int:
     pins = collect_pins()
     found = set(pins)
@@ -105,6 +110,7 @@ def main() -> int:
         )
 
     return 1 if unexpected or resolved else 0
+
 
 if __name__ == "__main__":
     raise SystemExit(main())

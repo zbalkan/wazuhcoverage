@@ -23,9 +23,7 @@ def _finding(*, status: str = "no_decoder", pattern: str) -> Finding:
 
 
 def test_drain_wildcards_become_osregex_tokens() -> None:
-    regex_type, regex = suggest_wazuh_regex(
-        "Failed password for <*> from <*> port <*> ssh2"
-    )
+    regex_type, regex = suggest_wazuh_regex("Failed password for <*> from <*> port <*> ssh2")
 
     assert regex_type == "osregex"
     assert regex == r"^Failed password for \S+ from \S+ port \S+ ssh2$"
@@ -71,10 +69,7 @@ def test_text_finding_shows_the_candidate_beside_the_mined_pattern() -> None:
     rows = _finding_rows(1, finding, None)
 
     assert "    Pattern: Failed password for <*> from <*> port <*> ssh2" in rows
-    assert (
-        r"    Suggested Wazuh regex (osregex): ^Failed password for \S+ from \S+ port \S+ ssh2$"
-        in rows
-    )
+    assert r"    Suggested Wazuh regex (osregex): ^Failed password for \S+ from \S+ port \S+ ssh2$" in rows
 
 
 def test_html_finding_shows_the_candidate_beside_the_mined_pattern() -> None:

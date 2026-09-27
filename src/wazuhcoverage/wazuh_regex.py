@@ -39,22 +39,17 @@ def suggest_wazuh_regex(message_pattern: str) -> tuple[str, str]:
 
     parts = _PLACEHOLDER_RE.split(message_pattern)
     use_pcre2 = any(part in _PCRE2_ONLY_PLACEHOLDERS for part in parts) or any(
-        char in _OSREGEX_UNREPRESENTABLE
-        for index, part in enumerate(parts)
-        if index % 2 == 0
-        for char in part
+        char in _OSREGEX_UNREPRESENTABLE for index, part in enumerate(parts) if index % 2 == 0 for char in part
     )
 
     if use_pcre2:
         body = "".join(
-            _PCRE2_PLACEHOLDERS[part] if index % 2 else _escape_pcre2(part)
-            for index, part in enumerate(parts)
+            _PCRE2_PLACEHOLDERS[part] if index % 2 else _escape_pcre2(part) for index, part in enumerate(parts)
         )
         return "pcre2", f"^{body}$"
 
     body = "".join(
-        _OSREGEX_PLACEHOLDERS[part] if index % 2 else _escape_osregex(part)
-        for index, part in enumerate(parts)
+        _OSREGEX_PLACEHOLDERS[part] if index % 2 else _escape_osregex(part) for index, part in enumerate(parts)
     )
     return "osregex", f"^{body}$"
 

@@ -37,7 +37,10 @@ _DROPPED_PERCENT_WIDTH = 12
 # One column per outcome, then the breakdown of the dropped one. The two
 # aggregates come first so a row can be read for coverage alone; the three
 # that follow say why the dropped share was dropped and sum back to it.
-_LOG_TYPE_COLUMNS: tuple[Literal['Processed'], Literal['Dropped'], str, ...] = (_PROCESSED_LABEL, _DROPPED_LABEL) + DROPPED_STATUSES # type: ignore
+_LOG_TYPE_COLUMNS: tuple[Literal["Processed"], Literal["Dropped"], str, ...] = (
+    _PROCESSED_LABEL,
+    _DROPPED_LABEL,
+) + DROPPED_STATUSES  # type: ignore
 _LOG_TYPE_COLUMN_WIDTHS = {column: max(12, len(column) + 2) for column in _LOG_TYPE_COLUMNS}
 # The one bucket whose meaning the archive underdetermines; see
 # wazuhcoverage.models.STATUSES for why.
@@ -113,9 +116,7 @@ def render_report(
     if not by_key:
         lines.extend(_no_alerting_rule_note(analysis))
 
-    grouped: dict[str, list[tuple[Finding, Verification | None]]] = {
-        group: [] for group in FINDING_GROUPS
-    }
+    grouped: dict[str, list[tuple[Finding, Verification | None]]] = {group: [] for group in FINDING_GROUPS}
     for finding in analysis.findings:
         verification = by_key.get(finding.finding_key)
         status = verification.effective_state if verification is not None else finding.observed_status
@@ -228,7 +229,9 @@ def _resolved_outcome_table(statuses: dict[str, int], total: int) -> list[str]:
     for outcome, count in outcomes.items():
         rows.append(
             _outcome_row(
-                outcome, f"{count:,}", _percent(_percentage(count, total)),
+                outcome,
+                f"{count:,}",
+                _percent(_percentage(count, total)),
                 _percent(100.0) if outcome == "Dropped" and count else "-",
             )
         )

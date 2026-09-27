@@ -43,6 +43,7 @@ def _analysis() -> ArchiveAnalysis:
         ),
     )
 
+
 def _verification(
     state: str = "uncovered",
     *,
@@ -64,6 +65,7 @@ def _verification(
         error=error,
     )
 
+
 def test_html_report_embeds_template_css_js_and_uses_pinned_cdns() -> None:
     rendered = render_html_report(
         _analysis(),
@@ -83,16 +85,18 @@ def test_html_report_embeds_template_css_js_and_uses_pinned_cdns() -> None:
     assert "Metrics by log type" in rendered
     assert "Dropped" in rendered
 
+
 def test_html_report_escapes_finding_content_and_keeps_it_out_of_chart_json() -> None:
     rendered = render_html_report(_analysis(), (_verification(),))
 
     assert "__REPORT_DATA__ &lt;pattern&gt;" in rendered
-    assert '&lt;/script&gt;&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;' in rendered
+    assert "&lt;/script&gt;&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;" in rendered
 
     report_data = rendered.split('<script id="report-data" type="application/json">', 1)[1]
     report_data = report_data.split("</script>", 1)[0]
     assert 'alert("x")' not in report_data
     assert "<script>" not in report_data
+
 
 def test_html_report_uses_replay_state_for_findings_and_metrics() -> None:
     rendered = render_html_report(_analysis(), (_verification(),))
@@ -100,10 +104,12 @@ def test_html_report_uses_replay_state_for_findings_and_metrics() -> None:
     assert "<strong>uncovered · auditd · 2 events</strong>" in rendered
     assert "<small>Uncovered</small><h2>20.00%</h2><p>2 / 10</p>" in rendered
 
+
 def _report_data(rendered: str) -> dict:
     payload = rendered.split('<script id="report-data" type="application/json">', 1)[1]
     payload = payload.split("</script>", 1)[0]
     return json.loads(payload)
+
 
 def test_archive_only_html_uses_observed_outcome_semantics_and_shows_caveat() -> None:
     rendered = render_html_report(_analysis())
@@ -121,6 +127,7 @@ def test_archive_only_html_uses_observed_outcome_semantics_and_shows_caveat() ->
     assert "Archive ambiguity" in rendered
     assert "Without complete replay" in rendered
 
+
 def test_replay_fields_do_not_fall_back_to_stale_archive_decoder_or_rule() -> None:
     finding = replace(
         _analysis().findings[0],
@@ -137,6 +144,7 @@ def test_replay_fields_do_not_fall_back_to_stale_archive_decoder_or_rule() -> No
     assert "<th>Rule</th><td>—</td>" in rendered
     assert "<th>Level</th><td>—</td>" in rendered
     assert ">42<" not in rendered
+
 
 def test_replay_description_and_contribution_data_are_rendered() -> None:
     verification = _verification(

@@ -21,6 +21,7 @@ class _IndexedLogClusterCache(LogClusterCache):
         self._drain._remove_indexed_template(cluster_id)
         return cluster_id, cluster
 
+
 class IndexedDrain(Drain):
     """Drain with an exact positional-token candidate index.
 
@@ -123,7 +124,10 @@ class IndexedDrain(Drain):
             return super().fast_match(cluster_ids, tokens, sim_th, include_params)
 
         probes = sorted(
-            ((len(self._postings.get((position, token), ())), position, token) for position, token in enumerate(tokens)),
+            (
+                (len(self._postings.get((position, token), ())), position, token)
+                for position, token in enumerate(tokens)
+            ),
             key=lambda item: (item[0], item[1]),
         )[:positions_to_probe]
         candidate_ids: set[int] = set()

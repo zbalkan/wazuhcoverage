@@ -41,9 +41,7 @@ def test_version_needs_no_target() -> None:
 
 @pytest.mark.parametrize("version_flag", ["-V", "--version"])
 @pytest.mark.parametrize("other_flag", ["-n", "--strict", "-f"])
-def test_version_warns_when_combined_with_another_flag(
-    version_flag: str, other_flag: str, capsys
-) -> None:
+def test_version_warns_when_combined_with_another_flag(version_flag: str, other_flag: str, capsys) -> None:
     arguments = [version_flag, other_flag]
     if other_flag == "-f":
         arguments.append("json")
@@ -590,7 +588,11 @@ def test_an_unusable_daemon_warns_once_and_keeps_going(monkeypatch: pytest.Monke
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(cli, "resolve_targets", lambda _targets: [first, second])
     monkeypatch.setattr(cli, "analyze_archive", lambda path, **_kwargs: _analysis(Path(path)))
-    monkeypatch.setattr(cli, "unavailable_reason", lambda: "the wazuh-logtest socket at /var/ossec/queue/sockets/logtest is not answering")
+    monkeypatch.setattr(
+        cli,
+        "unavailable_reason",
+        lambda: "the wazuh-logtest socket at /var/ossec/queue/sockets/logtest is not answering",
+    )
     monkeypatch.setattr(cli, "verify_findings", lambda *_args, **_kwargs: pytest.fail("must not replay"))
     monkeypatch.setattr(cli, "render_report", lambda _analysis, _verifications=(), **_kwargs: "report\n")
 
@@ -646,9 +648,7 @@ def test_the_probe_happens_before_the_first_archive_is_read(
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="Wazuh Manager is not supported on Windows")
-def test_offline_run_assumes_wazuh_default_threshold(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys
-) -> None:
+def test_offline_run_assumes_wazuh_default_threshold(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys) -> None:
     archive = tmp_path / "archive.json.gz"
     archive.touch()
     analyzed: list[dict] = []
@@ -670,10 +670,7 @@ def test_offline_run_assumes_wazuh_default_threshold(
     captured = capsys.readouterr()
 
     assert analyzed == [{"alert_threshold": 3, "skip_malformed": True}]
-    assert (
-        f"Alert threshold: 3 (Wazuh default assumed; could not read {cli.DEFAULT_OSSEC_CONF})"
-        in captured.out
-    )
+    assert f"Alert threshold: 3 (Wazuh default assumed; could not read {cli.DEFAULT_OSSEC_CONF})" in captured.out
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="Wazuh Manager is not supported on Windows")
@@ -710,14 +707,10 @@ def test_online_run_reads_threshold_once_and_reports_source(
         {"alert_threshold": 6, "skip_malformed": True},
         {"alert_threshold": 6, "skip_malformed": True},
     ]
-    assert captured.out.count(
-        f"Alert threshold: 6 (from {cli.DEFAULT_OSSEC_CONF})"
-    ) == 2
+    assert captured.out.count(f"Alert threshold: 6 (from {cli.DEFAULT_OSSEC_CONF})") == 2
 
 
-def test_online_run_assumes_default_when_threshold_cannot_be_read(
-    monkeypatch: pytest.MonkeyPatch, capsys
-) -> None:
+def test_online_run_assumes_default_when_threshold_cannot_be_read(monkeypatch: pytest.MonkeyPatch, capsys) -> None:
     monkeypatch.setattr(cli, "read_alert_threshold", lambda: (_ for _ in ()).throw(PermissionError("denied")))
 
     threshold, source = cli._resolve_alert_threshold()

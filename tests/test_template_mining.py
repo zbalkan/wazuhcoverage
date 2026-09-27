@@ -151,7 +151,7 @@ def test_template_text_survives_the_file_handover(tmp_path: Path) -> None:
     # Template text is handed to DuckDB through a JSON file. Quotes,
     # backslashes, delimiters and characters outside the BMP must come back
     # byte for byte; Drain itself only rejoins tokens with single spaces.
-    text = 'app wrote "C:\\Temp\\x, y|z" for \u00e9l\u00e8ve \U0001F600 {"k": [1]}\ttab'
+    text = 'app wrote "C:\\Temp\\x, y|z" for \u00e9l\u00e8ve \U0001f600 {"k": [1]}\ttab'
     _write_jsonl(archive, [_undecoded(text)])
 
     result = analyze_archive(archive)

@@ -121,9 +121,7 @@ def test_a_level_zero_match_is_suppressiond_not_uncovered(monkeypatch: MonkeyPat
         ("RuleMatch", 12, "at_or_above_threshold"),
     ],
 )
-def test_every_reply_maps_to_one_effective_state(
-    monkeypatch: MonkeyPatch, status: str, level, expected: str
-) -> None:
+def test_every_reply_maps_to_one_effective_state(monkeypatch: MonkeyPatch, status: str, level, expected: str) -> None:
     _install(monkeypatch, _FakeTester(_response(status, rule_id="1", rule_level=level)))
 
     (result,) = verify_findings(_analysis(_finding("k")), alert_threshold=3)
@@ -252,7 +250,6 @@ def test_a_negative_threshold_is_rejected() -> None:
         verify_findings(_analysis(_finding("k")), alert_threshold=-1)
 
 
-
 def test_the_probe_is_silent_when_a_replay_is_possible(monkeypatch: MonkeyPatch) -> None:
     _install(monkeypatch, _FakeTester(_response("NoRule")))
 
@@ -266,7 +263,6 @@ def test_the_probe_names_an_unanswering_socket(monkeypatch: MonkeyPatch) -> None
 
     assert reason is not None
     assert "/tmp/nope.sock" in reason
-
 
 
 def test_a_half_removed_install_is_a_reason_not_a_crash(monkeypatch: MonkeyPatch) -> None:

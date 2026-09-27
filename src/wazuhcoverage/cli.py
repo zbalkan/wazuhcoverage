@@ -53,24 +53,21 @@ class _ArgumentParser(argparse.ArgumentParser):
         self,
         args: Iterable[str] | None = None,
         namespace: None = None,
-    ) -> argparse.Namespace:
-        ...
+    ) -> argparse.Namespace: ...
 
     @overload
     def parse_args(
         self,
         args: Iterable[str] | None,
         namespace: _Namespace,
-    ) -> _Namespace:
-        ...
+    ) -> _Namespace: ...
 
     @overload
     def parse_args(
         self,
         *,
         namespace: _Namespace,
-    ) -> _Namespace:
-        ...
+    ) -> _Namespace: ...
 
     def parse_args(
         self,
@@ -201,12 +198,7 @@ def _run(args: argparse.Namespace) -> int:
         print("wazuhcoverage: --html requires exactly one archive", file=sys.stderr)
         return 2
 
-    if (
-        args.html is not None
-        and not read_stdin
-        and targets
-        and _same_file(args.html, targets[0])
-    ):
+    if args.html is not None and not read_stdin and targets and _same_file(args.html, targets[0]):
         print("wazuhcoverage: HTML output must not overwrite the input archive", file=sys.stderr)
         return 2
 

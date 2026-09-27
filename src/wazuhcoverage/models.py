@@ -37,6 +37,7 @@ STATUSES = (
 PROCESSED_STATUS = "at_or_above_threshold"
 DROPPED_STATUSES = tuple(status for status in STATUSES if status != PROCESSED_STATUS)
 
+
 @dataclass(frozen=True)
 class StatusCount:
     status: str
@@ -45,6 +46,7 @@ class StatusCount:
     # excluded from that denominator, so these percentages sum to 100.0 (up to
     # float representation) across all statuses of a non-empty archive.
     percentage: float
+
 
 @dataclass(frozen=True)
 class LogTypeCount:
@@ -58,6 +60,7 @@ class LogTypeCount:
     # archive, status_percentage ranks it inside its own bucket, where a small
     # bucket can still be dominated by one source.
     status_percentage: float
+
 
 # What a replay through wazuh-logtest found, in declared order. These are not
 # the archive's buckets: logtest reports the rule it matched whatever that
@@ -73,6 +76,7 @@ EFFECTIVE_STATES = (
     "at_or_above_threshold",
     "unverified",
 )
+
 
 @dataclass(frozen=True)
 class Finding:
@@ -95,6 +99,7 @@ class Finding:
     observed_rule_level: int | None
     sample_log: str
 
+
 @dataclass(frozen=True)
 class Verification:
     """What wazuh-logtest made of one finding's representative sample.
@@ -116,6 +121,7 @@ class Verification:
     rule_groups: tuple[str, ...]
     # Why the state is "unverified"; None whenever it is not.
     error: str | None
+
 
 @dataclass(frozen=True)
 class ArchiveAnalysis:

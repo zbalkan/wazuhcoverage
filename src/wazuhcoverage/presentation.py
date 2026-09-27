@@ -28,6 +28,7 @@ _FINDING_GROUP = {
     "unverified": "Unresolved",
 }
 
+
 @dataclass(frozen=True)
 class FindingPresentation:
     """Replay-aware fields shared by report renderers."""
@@ -40,15 +41,18 @@ class FindingPresentation:
     rule_description: str | None
     replay_error: str | None
 
+
 def effective_outcome(status: str) -> str:
     """Map an effective status to the report's resolved outcome."""
 
     return _EFFECTIVE_OUTCOME[status]
 
+
 def finding_group(status: str) -> str:
     """Return the Findings section for an observed or effective status."""
 
     return _FINDING_GROUP[status]
+
 
 def outcome_counts(statuses: dict[str, int], *, resolved: bool) -> dict[str, int]:
     """Aggregate statuses using archive-only or replay-resolved semantics."""
@@ -64,6 +68,7 @@ def outcome_counts(statuses: dict[str, int], *, resolved: bool) -> dict[str, int
     for status, count in statuses.items():
         counts[effective_outcome(status)] += count
     return counts
+
 
 def present_finding(
     finding: Finding,
