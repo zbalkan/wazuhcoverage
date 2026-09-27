@@ -30,9 +30,10 @@ import random
 import re
 from collections import Counter, defaultdict
 from collections.abc import Callable
+from typing import Dict, List, Tuple  # noqa: UP035
 
-from drain3 import TemplateMiner
-from drain3.template_miner_config import TemplateMinerConfig
+from drain3 import TemplateMiner  # type: ignore
+from drain3.template_miner_config import TemplateMinerConfig  # type: ignore
 
 USERS = ["root", "admin", "jdoe", "postgres", "guest", "svc-backup", "alice", "bob", "mmuster", "c.wang"]
 HOSTS = [f"srv-{index:03d}" for index in range(40)]
@@ -51,7 +52,7 @@ def _port() -> int:
 # Each entry is one semantic event class. Correct grouping means one template
 # per family and no template covering two. The near-miss pairs -- 4624/4625,
 # ACCEPT/DROP, Failed/Accepted -- are the ones that matter most.
-FAMILIES: Dict[str, Callable[[], str]] = {
+FAMILIES: Dict[str, Callable[[], str]] = {  # noqa: UP006
     "sshd_failed": lambda: f"Failed password for {random.choice(USERS)} from {_ip()} port {_port()} ssh2",
     "sshd_accepted": lambda: f"Accepted publickey for {random.choice(USERS)} from {_ip()} port {_port()} ssh2",
     "sshd_invalid": lambda: f"Invalid user {random.choice(USERS)} from {_ip()} port {_port()}",
@@ -117,7 +118,7 @@ def normalize(text: str) -> str:
     return text.strip()
 
 
-def build_corpus(events_per_family: int = 400, seed: int = 11) -> List[Tuple[str, str]]:
+def build_corpus(events_per_family: int = 400, seed: int = 11) -> List[Tuple[str, str]]:  # noqa: UP006
     """Return (family, full_log) pairs."""
 
     random.seed(seed)
@@ -125,13 +126,13 @@ def build_corpus(events_per_family: int = 400, seed: int = 11) -> List[Tuple[str
 
 
 def evaluate(
-    rows: List[Tuple[str, str]],
+    rows: List[Tuple[str, str]],  # noqa: UP006
     *,
     sim_th: float,
     depth: int,
     max_clusters: int | None = None,
     parametrize_numeric_tokens: bool = True,
-) -> Dict:
+) -> Dict:  # noqa: UP006
     config = TemplateMinerConfig()
     config.profiling_enabled = False
     config.masking_instructions = []
@@ -146,20 +147,20 @@ def evaluate(
         events[(family, normalize(log))] += 1
 
     assigned = {message: miner.add_log_message(message)["cluster_id"] for message in sorted({m for _, m in events})}
-    mined = {cluster.cluster_id: cluster.get_template() for cluster in miner.drain.clusters}
+    mined = {cluster.cluster_id: cluster.get_template() for cluster in miner.drain.clusters}  # type: ignore
 
-    by_template: Dict[str, Counter] = defaultdict(Counter)
+    by_template: Dict[str, Counter] = defaultdict(Counter)  # noqa: UP006
     for (family, message), count in events.items():
         by_template[mined[assigned[message]]][family] += count
 
-    templates_per_family: Dict[str, set] = defaultdict(set)
+    templates_per_family: Dict[str, set] = defaultdict(set)  # noqa: UP006
     for template, families in by_template.items():
         for family in families:
             templates_per_family[family].add(template)
 
     return {
         "templates": len(by_template),
-        "impure": {template: Dict(f) for template, f in by_template.items() if len(f) > 1},
+        "impure": {template: dict(f) for template, f in by_template.items() if len(f) > 1},
         "frag": {family: len(t) for family, t in sorted(templates_per_family.items()) if len(t) > 1},
     }
 

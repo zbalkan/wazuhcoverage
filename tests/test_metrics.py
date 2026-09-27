@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Tuple  # noqa: UP035
 
 import pytest
 
@@ -80,7 +81,7 @@ def _analysis() -> ArchiveAnalysis:
     )
 
 
-def _verifications() -> Tuple[Verification, ...]:
+def _verifications() -> Tuple[Verification, ...]:  # noqa: UP006
     return (
         _verification("nd", "no_decoder", decoder=None),
         _verification("u", "uncovered", decoder="firewall"),
@@ -203,10 +204,10 @@ def test_populated_contributions_sum_to_one() -> None:
 
 
 def test_replay_decoder_moves_the_effective_log_type() -> None:
-    verifications = List(_verifications())
+    verifications = list(_verifications())
     verifications[1] = _verification("u", "uncovered", decoder="normalized-firewall")
 
-    snapshot = calculate_metrics(_analysis(), Tuple(verifications))
+    snapshot = calculate_metrics(_analysis(), tuple(verifications))
     rows = {item.log_type: item for item in snapshot.log_types}
 
     assert rows["normalized-firewall"].uncovered_rate.count == 90

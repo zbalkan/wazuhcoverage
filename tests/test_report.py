@@ -1,7 +1,8 @@
 from dataclasses import replace
 from pathlib import Path
+from typing import List  # noqa: UP035
 
-from wazuhcoverage import ArchiveAnalysis, Finding, LogTypeCount, StatusCount, Verification
+from wazuhcoverage import ArchiveAnalysis, Finding, LogTypeCount, StatusCount, Verification  # type: ignore
 from wazuhcoverage.report import render_report
 
 
@@ -57,14 +58,14 @@ def _analysis() -> ArchiveAnalysis:
     )
 
 
-def _rendered_log_type_rows(analysis: ArchiveAnalysis) -> List[str]:
+def _rendered_log_type_rows(analysis: ArchiveAnalysis) -> List[str]:  # noqa: UP006
     lines = render_report(analysis).splitlines()
     header = next(index for index, line in enumerate(lines) if line.startswith("Log type") and "Processed" in line)
     end = lines.index("", header + 1)
     return lines[header + 1 : end]
 
 
-def _rendered_outcome_rows(analysis: ArchiveAnalysis) -> List[str]:
+def _rendered_outcome_rows(analysis: ArchiveAnalysis) -> List[str]:  # noqa: UP006
     lines = render_report(analysis).splitlines()
     header = next(index for index, line in enumerate(lines) if line.startswith("Outcome") and "% dropped" in line)
     end = lines.index("", header + 1)
@@ -140,7 +141,7 @@ def test_the_dropped_share_is_blank_when_nothing_was_dropped() -> None:
 def test_every_bucket_is_listed_even_at_zero() -> None:
     analysis = replace(
         _analysis(),
-        status_counts=Tuple(
+        status_counts=tuple(
             replace(item, event_count=0, percentage=0.0) if item.status == "below_threshold" else item
             for item in _analysis().status_counts
         ),
@@ -285,7 +286,7 @@ def test_the_caveat_is_omitted_when_the_bucket_is_empty() -> None:
     analysis = _analysis()
     analysis = replace(
         analysis,
-        status_counts=Tuple(
+        status_counts=tuple(
             replace(item, event_count=0, percentage=0.0) if item.status == "no_alerting_rule" else item
             for item in analysis.status_counts
         ),
@@ -360,7 +361,7 @@ def _verified_analysis() -> ArchiveAnalysis:
     )
 
 
-def _verifications() -> Tuple[Verification, ...]:
+def _verifications() -> tuple[Verification, ...]:
     return (
         Verification(
             finding_key="suppressed",

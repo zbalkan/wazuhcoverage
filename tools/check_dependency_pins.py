@@ -24,6 +24,7 @@ from __future__ import annotations
 import re
 import sys
 from importlib import metadata
+from typing import Dict, List, Tuple  # noqa: UP035
 
 ROOT = "wazuhcoverage"
 
@@ -47,7 +48,7 @@ def _requirement_name(requirement: str) -> str | None:
     return _canonical(match.group(1)) if match else None
 
 
-def _requirements(distribution: str) -> List[str]:
+def _requirements(distribution: str) -> List[str]:  # noqa: UP006
     try:
         requires = metadata.distribution(distribution).requires or []
     except metadata.PackageNotFoundError:
@@ -59,10 +60,10 @@ def _requirements(distribution: str) -> List[str]:
     return [requirement for requirement in requires if "extra ==" not in requirement]
 
 
-def collect_pins() -> Dict[Tuple[str, str], str]:
+def collect_pins() -> Dict[Tuple[str, str], str]:  # noqa: UP006
     """Return {(requiring distribution, required distribution): requirement}."""
 
-    pins: Dict[Tuple[str, str], str] = {}
+    pins: Dict[Tuple[str, str], str] = {}  # noqa: UP006
     seen = {_canonical(ROOT)}
     queue = [_canonical(ROOT)]
 

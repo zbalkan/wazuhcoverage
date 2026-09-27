@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from typing import Tuple  # noqa: UP035
 
 from wazuhcoverage.preprocessing import WAZUH_TIMESTAMP_PCRE2
 
@@ -28,7 +29,7 @@ _PCRE2_PLACEHOLDERS = {
 _PCRE2_SPECIALS = frozenset(r"\.^$|?*+()[]{}")
 
 
-def suggest_wazuh_regex(message_pattern: str) -> Tuple[str, str]:
+def suggest_wazuh_regex(message_pattern: str) -> Tuple[str, str]:  # noqa: UP006
     """Return a Wazuh regex type and best-effort expression for a mined pattern.
 
     Literal text is preserved. OSRegex is used for ordinary Drain wildcards.

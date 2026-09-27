@@ -1,18 +1,19 @@
 import json
 from pathlib import Path
+from typing import Dict, List  # noqa: UP035
 
 import duckdb
 
-from wazuhcoverage import analyze_archive
+from wazuhcoverage import analyze_archive  # type: ignore
 
 
-def _write_jsonl(path: Path, rows: List[Dict]) -> None:
+def _write_jsonl(path: Path, rows: List[Dict]) -> None:  # noqa: UP006
     with path.open("w", encoding="utf-8") as stream:
         for row in rows:
             stream.write(json.dumps(row) + "\n")
 
 
-def _undecoded(full_log: str, agent_id: str = "001") -> Dict:
+def _undecoded(full_log: str, agent_id: str = "001") -> Dict:  # noqa: UP006
     return {
         "timestamp": "2026-09-18T10:00:00+00:00",
         "agent": {"id": agent_id, "name": "host"},
@@ -22,7 +23,7 @@ def _undecoded(full_log: str, agent_id: str = "001") -> Dict:
     }
 
 
-def _ssh_failures() -> List[Dict]:
+def _ssh_failures() -> List[Dict]:  # noqa: UP006
     # The normalizer masks syntactic variance only, so these five lines are five
     # distinct strings when they reach the miner: usernames, addresses and short
     # ports cannot be masked by regex without enumerating them.

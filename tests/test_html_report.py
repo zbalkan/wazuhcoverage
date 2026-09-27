@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from dataclasses import replace
 from pathlib import Path
+from typing import Dict  # noqa: UP035
 
 from wazuhcoverage.html_report import render_html_report
 from wazuhcoverage.models import ArchiveAnalysis, Finding, LogTypeCount, StatusCount, Verification
@@ -105,7 +106,7 @@ def test_html_report_uses_replay_state_for_findings_and_metrics() -> None:
     assert "<small>Uncovered</small><h2>20.00%</h2><p>2 / 10</p>" in rendered
 
 
-def _report_data(rendered: str) -> Dict:
+def _report_data(rendered: str) -> Dict:  # noqa: UP006
     payload = rendered.split('<script id="report-data" type="application/json">', 1)[1]
     payload = payload.split("</script>", 1)[0]
     return json.loads(payload)

@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from glob import glob
 from pathlib import Path
+from typing import List  # noqa: UP035
 
 
-def resolve_targets(targets: List[str]) -> List[Path]:
+def resolve_targets(targets: List[str]) -> List[Path]:  # noqa: UP006
     """Resolve literal paths and glob patterns to unique absolute files.
 
     ``**`` is supported. Results are sorted to make repeated runs deterministic.
