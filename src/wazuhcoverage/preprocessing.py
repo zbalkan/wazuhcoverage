@@ -12,7 +12,11 @@ if TYPE_CHECKING:
 # DuckDB/RE2 and Wazuh PCRE2. They recognize syntax, not calendar validity.
 #
 # Order matters where one syntax is a prefix of another. Timezone-bearing ISO
-# forms must be tried before the otherwise identical no-timezone form.
+# forms must be tried before the otherwise identical no-timezone form. The
+# space-separated form keeps its timezone optional instead: the greedy group
+# consumes it, so no "+03:00" or "Z" remnant is left behind as its own token.
+# RFC3164 separators accept runs of spaces or tabs, as syslog senders pad the
+# day inconsistently; a raw month left behind would become a Drain routing key.
 TIMESTAMP_PATTERNS = (
     (
         "iso8601_tz",
@@ -32,14 +36,14 @@ TIMESTAMP_PATTERNS = (
         "ymd_space",
         (
             r"[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}"
-            r"([.,][0-9]+)?"
+            r"([.,][0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})?"
         ),
     ),
     (
         "rfc3164",
         (
             r"(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)"
-            r" {1,2}[0-9]{1,2} [0-9]{2}:[0-9]{2}:[0-9]{2}"
+            r"[ \t]+[0-9]{1,2}[ \t]+[0-9]{2}:[0-9]{2}:[0-9]{2}"
         ),
     ),
     (
