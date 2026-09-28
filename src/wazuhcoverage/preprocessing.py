@@ -81,6 +81,13 @@ WAZUH_TIMESTAMP_PCRE2 = f"(?:{_TIMESTAMP_ALTERNATION})"
 _UUID_RE2 = r"[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}"
 _HEX_RE2 = r"\b(0x)?[0-9A-Fa-f]{16,}\b"
 _NUM_RE2 = r"\b[0-9]{5,}\b"
+# Every UUID, HEX or NUM match contains one of these runs: a UUID opens with
+# eight hexadecimal characters, a HEX token has at least sixteen and a NUM
+# token at least five digits. A log without either run cannot change in those
+# three passes, so the guard skips them without altering any output. It pays
+# for itself on logs that carry no such values; on logs that do, it costs one
+# extra scan up to the first qualifying run.
+_VALUE_MASK_GUARD_RE2 = r"[0-9]{5}|[0-9A-Fa-f]{8}"
 
 
 def _sql_literal(value: str) -> str:
@@ -100,32 +107,31 @@ def install_preprocessor(connection: DuckDBPyConnection) -> None:
     uuid = _sql_literal(_UUID_RE2)
     hexadecimal = _sql_literal(_HEX_RE2)
     number = _sql_literal(_NUM_RE2)
+    guard = _sql_literal(_VALUE_MASK_GUARD_RE2)
 
+    # The timestamp step cannot create a guard run, since "<TIMESTAMP>" holds
+    # no eight consecutive hexadecimal characters, so the guard reads the raw
+    # log and the timestamp step is written once per branch.
+    stamped = f"regexp_replace(coalesce(log, ''), {timestamp}, '<TIMESTAMP>', 'c')"
     connection.execute(
         f"""
         CREATE TEMP MACRO preprocess_log(log) AS
         trim(
-            regexp_replace(
-                regexp_replace(
+            CASE
+                WHEN regexp_matches(coalesce(log, ''), {guard}) THEN
                     regexp_replace(
                         regexp_replace(
-                            coalesce(log, ''),
-                            {timestamp},
-                            '<TIMESTAMP>',
-                            'c'
+                            regexp_replace({stamped}, {uuid}, '<UUID>', 'g'),
+                            {hexadecimal},
+                            '<HEX>',
+                            'g'
                         ),
-                        {uuid},
-                        '<UUID>',
+                        {number},
+                        '<NUM>',
                         'g'
-                    ),
-                    {hexadecimal},
-                    '<HEX>',
-                    'g'
-                ),
-                {number},
-                '<NUM>',
-                'g'
-            )
+                    )
+                ELSE {stamped}
+            END
         )
         """
     )
