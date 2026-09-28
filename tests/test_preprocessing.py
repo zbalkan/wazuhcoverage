@@ -1,6 +1,7 @@
 import duckdb
 import pytest
 
+from wazuhcoverage import preprocessing
 from wazuhcoverage.preprocessing import install_preprocessor
 
 
@@ -98,3 +99,38 @@ def test_existing_conservative_value_masks_are_preserved() -> None:
         connection.close()
 
     assert value == "id=<NUM> uuid=<UUID> hash=<HEX>"
+
+
+def test_value_mask_guard_never_changes_the_output() -> None:
+    # The unguarded chain the guard short-circuits, built from the same patterns.
+    literal = preprocessing._sql_literal
+    reference = (
+        "trim(regexp_replace(regexp_replace(regexp_replace(regexp_replace(coalesce(?, ''), "
+        f"{literal(preprocessing.TIMESTAMP_PREFIX_RE2)}, '<TIMESTAMP>', 'c'), "
+        f"{literal(preprocessing._UUID_RE2)}, '<UUID>', 'g'), "
+        f"{literal(preprocessing._HEX_RE2)}, '<HEX>', 'g'), "
+        f"{literal(preprocessing._NUM_RE2)}, '<NUM>', 'g'))"
+    )
+    logs = [
+        None,
+        "",
+        "Sep 26 13:58:42 host sshd[123]: Failed password for root",
+        "Sep 26 13:58:42 host sshd[12345]: Failed password for root",
+        "hash=deadbeefdeadbeef",
+        "id abcdefab-abcd-abcd-abcd-abcdefabcdef done",
+        "20260926T105842Z pid 1234",
+        "20260926T105842Z pid 12345",
+        "2026-09-26T10:58:42Z 0xABCDEF0123456789",
+        "words like decade and faced stay",
+        "pid1234567 and 1234567",
+        "١٢٣٤٥ non-ASCII digits",
+    ]
+    connection = duckdb.connect()
+    try:
+        install_preprocessor(connection)
+        for log in logs:
+            row = connection.execute(f"SELECT preprocess_log(?), {reference}", [log, log]).fetchone()
+            assert row is not None
+            assert row[0] == row[1], log
+    finally:
+        connection.close()
