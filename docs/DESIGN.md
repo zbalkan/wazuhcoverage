@@ -8,7 +8,7 @@ Wazuh's analysisd drops the matched rule from an archived event when that rule s
 
 The bucket is named for what the record proves — no alerting rule was attached — rather than for the stronger claim that no rule was evaluated. `no_rule`, the obvious name, is the one it must not have: a reader acts on that name, and acting on it means writing a rule for an event a level-0 rule already recognises.
 
-When no replay is possible the report prints a note beside the findings, because an empty `Rule` and `Level` otherwise imply the stronger claim on their own. When a replay is possible the note is dropped, since the `Effective` line has answered the question the note exists to raise.
+A report is only produced with a manager to replay against, so every rule-less finding carries the manager's verdict in place of the empty `Rule` and `Level` that would otherwise imply the stronger claim on their own.
 
 `tests/test_analysis_integration.py` pins both the bucket name and the classification of a real archived EventChannel event that logtest resolves to rule `61100` at level 0 on a manager whose rule 60000 accepts JSON (see [Verification through logtest](#location-and-what-could-not-be-derived)).
 

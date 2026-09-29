@@ -86,77 +86,35 @@ def test_report_renders_outcome_and_log_type_tables() -> None:
         "%",
         "total",
         "Processed",
+        "Suppressed",
         "Dropped",
-        "no_decoder",
-        "no_alerting_rule",
-        "below_threshold",
+        "Unresolved",
     ]
 
 
-def test_the_outcome_table_splits_the_archive_into_processed_and_dropped() -> None:
-    # at_or_above_threshold is the only bucket that reached an alert, so it is
-    # the whole of Processed and the other three are the whole of Dropped.
+def test_events_without_a_verdict_keep_their_observed_outcome() -> None:
+    # Findings that were not replayed, and buckets that are never replayed, are
+    # placed by what the archive recorded: below_threshold matched a rule, so it
+    # is Suppressed; a rule-less event without a verdict stays Unresolved.
     rows = [row.split() for row in _rendered_outcome_rows(_analysis())]
 
-    assert rows[0] == ["Processed", "(at_or_above_threshold)", "3", "30.00%", "-"]
-    assert rows[1] == ["Dropped", "7", "70.00%", "100.00%"]
-    assert [row[0] for row in rows[2:]] == ["no_decoder", "no_alerting_rule", "below_threshold"]
-
-
-def test_the_dropped_buckets_sum_back_to_the_dropped_total() -> None:
-    rows = [row.split() for row in _rendered_outcome_rows(_analysis())]
-
-    assert sum(int(row[1]) for row in rows[2:]) == int(rows[1][1])
-    assert int(rows[0][2]) + int(rows[1][1]) == 10
-
-
-def test_a_dropped_bucket_is_sized_against_the_dropped_events() -> None:
-    # 3 of 7 dropped events, not 3 of 10 archived ones: a bucket holding a few
-    # per cent of a well-covered archive can still be most of what is left.
-    rows = [row.split() for row in _rendered_outcome_rows(_analysis())]
-
-    assert rows[2] == ["no_decoder", "3", "30.00%", "42.86%"]
-    assert rows[4] == ["below_threshold", "1", "10.00%", "14.29%"]
-
-
-def test_the_dropped_share_is_blank_when_nothing_was_dropped() -> None:
-    # A column of 0.00% would read as a measurement rather than an empty set.
-    analysis = replace(
-        _analysis(),
-        total_events=3,
-        status_counts=(
-            StatusCount(status="at_or_above_threshold", event_count=3, percentage=100.0),
-            StatusCount(status="no_decoder", event_count=0, percentage=0.0),
-            StatusCount(status="no_alerting_rule", event_count=0, percentage=0.0),
-            StatusCount(status="below_threshold", event_count=0, percentage=0.0),
-        ),
-    )
-
-    rows = [row.split() for row in _rendered_outcome_rows(analysis)]
-
-    assert rows[1] == ["Dropped", "0", "0.00%", "-"]
-    assert [row[-1] for row in rows[2:]] == ["-", "-", "-"]
-
-
-def test_every_bucket_is_listed_even_at_zero() -> None:
-    analysis = replace(
-        _analysis(),
-        status_counts=tuple(
-            replace(item, event_count=0, percentage=0.0) if item.status == "below_threshold" else item
-            for item in _analysis().status_counts
-        ),
-    )
-
-    rows = [row.split() for row in _rendered_outcome_rows(analysis)]
-
-    assert rows[-1][:2] == ["below_threshold", "0"]
+    assert rows == [
+        ["Processed", "3", "30.00%", "-"],
+        ["Suppressed", "1", "10.00%", "-"],
+        ["suppressed", "0", "0.00%", "-"],
+        ["below_threshold", "1", "10.00%", "-"],
+        ["Dropped", "3", "30.00%", "100.00%"],
+        ["no_decoder", "3", "30.00%", "100.00%"],
+        ["uncovered", "0", "0.00%", "0.00%"],
+        ["Unresolved", "3", "30.00%", "-"],
+    ]
 
 
 def test_log_type_table_groups_statuses_into_one_row_per_type() -> None:
     rows = _rendered_log_type_rows(_analysis())
 
     sshd = next(row for row in rows if row.startswith("sshd"))
-    assert sshd.split() == ["sshd", "6", "60.00%", "3", "3", "0", "2", "1"]
+    assert sshd.split() == ["sshd", "6", "60.00%", "3", "1", "0", "2"]
 
 
 def test_log_type_table_is_sorted_by_aggregate_event_count() -> None:
@@ -169,7 +127,7 @@ def test_report_renders_a_missing_log_type_as_a_dash() -> None:
     rows = _rendered_log_type_rows(_analysis())
 
     missing = next(row for row in rows if row.lstrip().startswith("-"))
-    assert missing.split() == ["-", "1", "10.00%", "0", "1", "0", "1", "0"]
+    assert missing.split() == ["-", "1", "10.00%", "0", "0", "0", "1"]
     assert not any("None" in row for row in rows)
 
 
@@ -269,30 +227,6 @@ def test_report_output_is_plain_ascii_text() -> None:
 
     assert "\x1b" not in text
     assert text.isascii()
-
-
-def test_report_flags_what_an_absent_rule_does_not_prove() -> None:
-    # An empty Rule and Level reads as "nothing matched", but Wazuh writes the
-    # same archive record for a level-0 match and for a suppressed one. The
-    # report carries that caveat where the findings are read.
-    text = render_report(_analysis())
-
-    assert "no_alerting_rule event carries no rule in the archive" in text
-    assert "the matching rule was level 0" in text
-    assert "wazuh-logtest" in text
-
-
-def test_the_caveat_is_omitted_when_the_bucket_is_empty() -> None:
-    analysis = _analysis()
-    analysis = replace(
-        analysis,
-        status_counts=tuple(
-            replace(item, event_count=0, percentage=0.0) if item.status == "no_alerting_rule" else item
-            for item in analysis.status_counts
-        ),
-    )
-
-    assert "Note:" not in render_report(analysis)
 
 
 def _verified_analysis() -> ArchiveAnalysis:
@@ -404,8 +338,6 @@ def test_a_verified_report_names_the_rule_the_archive_omitted() -> None:
     assert "    Level:" not in uncovered
     assert "    Effective:" not in text
     assert "  no_alerting_rule" not in text
-    assert "\nOutcome\n" not in text
-    assert "\nLog types\n" not in text
 
 
 def test_the_effective_table_weights_states_by_events() -> None:
@@ -422,7 +354,7 @@ def test_the_effective_table_weights_states_by_events() -> None:
 def test_replayed_summary_separates_suppressed_from_dropped() -> None:
     text = render_report(_verified_analysis(), _verifications())
     lines = text.splitlines()
-    start = lines.index("Outcome (with replay)")
+    start = lines.index("Outcome")
     rows = [line.split() for line in lines[start + 3 : start + 11]]
 
     assert rows == [
@@ -436,7 +368,7 @@ def test_replayed_summary_separates_suppressed_from_dropped() -> None:
         ["Unresolved", "0", "0.00%", "-"],
     ]
     assert sum(int(rows[index][1]) for index in (0, 1, 4, 7)) == 53
-    start = lines.index("Log types (with replay)")
+    start = lines.index("Log types")
     log_types = [line.split() for line in lines[start + 3 : start + 5]]
     assert log_types == [
         ["windows_eventchannel", "40", "75.47%", "0", "40", "0", "0"],
@@ -452,7 +384,7 @@ def test_replay_decoder_replaces_archive_decoder_and_log_type() -> None:
     assert "    Decoder: auditd\n" in suppressed
     assert "    Decoder: windows_eventchannel\n" not in suppressed
     lines = text.splitlines()
-    start = lines.index("Log types (with replay)")
+    start = lines.index("Log types")
     log_types = [line.split() for line in lines[start + 3 : start + 5]]
     assert log_types == [
         ["auditd", "40", "75.47%", "0", "40", "0", "0"],
@@ -491,18 +423,11 @@ def test_below_threshold_replay_is_suppressed_not_dropped() -> None:
     assert "[1] below_threshold | windows_eventchannel" in text
     assert "    Rule: 100210\n    Level: 2\n" in text
     rows = text.splitlines()
-    start = rows.index("Outcome (with replay)")
+    start = rows.index("Outcome")
     assert rows[start + 4].split() == ["Suppressed", "40", "75.47%", "-"]
     assert rows[start + 6].split() == ["below_threshold", "40", "75.47%", "-"]
     assert rows[start + 7].split() == ["Dropped", "0", "0.00%", "-"]
     assert rows[start + 10].split() == ["Unresolved", "10", "18.87%", "-"]
-
-
-def test_a_verified_report_drops_the_note_it_has_answered() -> None:
-    # The note exists because the archive cannot separate suppressed from
-    # uncovered. Once a replay has, repeating it would be noise.
-    assert "Note:" not in render_report(_verified_analysis(), _verifications())
-    assert "Note:" in render_report(_verified_analysis())
 
 
 def test_an_unverified_finding_says_why() -> None:
@@ -526,13 +451,8 @@ def test_an_unverified_finding_says_why() -> None:
     assert "Replay: the logtest daemon reported an error for this sample" in text
     assert "[1] no_alerting_rule | windows_eventchannel" in text
     lines = text.splitlines()
-    start = lines.index("Outcome (with replay)")
+    start = lines.index("Outcome")
     assert lines[start + 10].split() == ["Unresolved", "50", "94.34%", "-"]
-
-
-def test_an_unverified_report_is_unchanged() -> None:
-    assert render_report(_verified_analysis()) == render_report(_verified_analysis(), ())
-    assert "Effective coverage" not in render_report(_verified_analysis())
 
 
 def test_a_verified_report_is_still_plain_ascii() -> None:

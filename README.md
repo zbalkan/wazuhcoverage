@@ -63,7 +63,7 @@ Every parsed event lands in exactly one observed bucket:
 
 The CLI reads `<alerts><log_alert_level>` from `/var/ossec/etc/ossec.conf` when the local manager configuration is available. Otherwise it assumes Wazuh's default threshold of `3`. The report shows both the threshold and its source before the statistics. The Python API keeps the threshold explicit for callers analysing archives elsewhere.
 
-`no_alerting_rule` needs care. A rule-less archive record does not, by itself, prove that no rule was evaluated. Wazuh can produce the same observable archive state for events that require different interpretations. When replay is available, `wazuhcoverage` uses `wazuh-logtest` to refine the result. See [CAVEATS.md](docs/CAVEATS.md) before treating coverage numbers as ground truth.
+`no_alerting_rule` needs care. A rule-less archive record does not, by itself, prove that no rule was evaluated. Wazuh can produce the same observable archive state for events that require different interpretations. `wazuhcoverage` replays each such finding through `wazuh-logtest` to resolve it. See [CAVEATS.md](docs/CAVEATS.md) before treating coverage numbers as ground truth.
 
 ## Metrics
 

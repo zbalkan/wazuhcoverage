@@ -58,8 +58,8 @@ def calculate_metrics(
 
     Replay verdicts replace the observed status of the finding they represent,
     using the same whole-archive adjustment as the human-readable report.
-    Uncovered coverage is unavailable until every ambiguous replay target is
-    resolved, unless the archive contains no rule-less decoded events at all.
+    Uncovered coverage is unavailable until every replay target has a verdict;
+    an archive with no replay targets is complete as it stands.
     """
 
     statuses, log_types = resolve_effective_counts(analysis, verifications)
@@ -184,13 +184,6 @@ def _replay_complete(
     """Say whether replay-dependent uncovered counts are complete enough to expose."""
 
     observed = {item.status: item.event_count for item in analysis.status_counts}
-    no_alerting_rule = observed.get("no_alerting_rule", 0)
-
-    # With no replay, zero rule-less decoded events is already a complete
-    # statement: every decoded event has an observed rule outcome.
-    if not verifications:
-        has_ruleless_finding = any(finding.observed_status == "no_alerting_rule" for finding in analysis.findings)
-        return no_alerting_rule == 0 and not has_ruleless_finding
 
     required_events = sum(observed.get(status, 0) for status in _REPLAYABLE_STATUSES)
     targets = [finding for finding in analysis.findings if finding.observed_status in _REPLAYABLE_STATUSES]
