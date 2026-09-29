@@ -56,7 +56,13 @@ The tool prefers this false-negative direction over a shared session that could 
 
 Wazuh decoder selection can depend on event location. `wazuhcoverage` retains the observed location of the sample's own event and supplies it during replay.
 
-The original `log_format` is not present in the archive, so it cannot be recovered reliably. Replay defaults to `syslog`; use `--log-format` when the source requires another format. A wrong format can send the sample through the wrong decoder chain and make the replay result misleading.
+The original `log_format` is not present in the archive either. Replay sends `syslog` unless `--log-format` says otherwise, but the value has no effect on Wazuh 4.14: wazuh-logtest requires the field and then injects every sample as a plain log through the same generic decoders whatever it says (`src/analysisd/logtest.c:194-201, 271, 810-817`). The option is kept for managers that may use it.
+
+## Windows EventChannel replay needs rule 60000 to accept JSON
+
+Wazuh archives an EventChannel event as the JSON its EventChannel decoder built, and that decoder only runs for events arriving from an agent's EventChannel queue. wazuh-logtest never calls it, so a replayed Windows sample is decoded by the generic `json` decoder. The stock rule 60000, the parent of every Windows rule, requires `<decoded_as>windows_eventchannel</decoded_as>`, so on a stock manager no Windows rule can match a replayed sample, and every Windows finding would replay as `uncovered` whatever the ruleset contains.
+
+Replaying Windows findings therefore requires rule 60000 to use `<decoded_as>json</decoded_as>` on the manager that answers the replay, as Wazuh's own ruleset tests arrange (`ruleset/testing/runtests.py`). Before replaying any EventChannel finding, `wazuhcoverage` replays one minimal Windows record; if no rule in the `windows` group matches it, every EventChannel finding is reported `unverified` with that reason rather than `uncovered`. Findings from other sources replay as usual.
 
 See [CLI.md](CLI.md#manager-replay) for the command-line behaviour.
 

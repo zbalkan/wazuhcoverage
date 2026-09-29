@@ -27,6 +27,7 @@ from __future__ import annotations
 from typing import Any, Tuple  # noqa: UP035
 
 from wazuhcoverage.analysis import DEFAULT_ALERT_THRESHOLD
+from wazuhcoverage.eventchannel import DECODER_NAME as EVENTCHANNEL_DECODER
 from wazuhcoverage.models import ArchiveAnalysis, Finding, Verification
 
 # The archive statuses worth replaying. below_threshold and
@@ -39,6 +40,23 @@ DEFAULT_VERIFIED_STATUSES = ("no_decoder", "no_alerting_rule")
 # it cannot be derived -- a JSON or EventChannel source needs the right value
 # passed in or its sample replays against the wrong decoder chain.
 DEFAULT_LOG_FORMAT = "syslog"
+
+# wazuh-logtest cannot replay an EventChannel record as the manager decoded it.
+# It injects every sample as a plain log and runs the generic decoders
+# (wazuh 4.14 src/analysisd/logtest.c:194-201, 271, 288-299); only analysisd's
+# EventChannel queue reaches DecodeWinevt, and the stock rule 60000, which every
+# Windows rule descends from, requires <decoded_as>windows_eventchannel</decoded_as>.
+# The archived sample is DecodeWinevt's JSON, so logtest decodes it as "json" and
+# no Windows rule can match unless rule 60000 is changed to <decoded_as>json</decoded_as>,
+# as Wazuh's own ruleset tests do (ruleset/testing/runtests.py). A minimal record
+# is replayed once to find out which kind of manager this is.
+EVENTCHANNEL_PROBE = (
+    '{"win":{"system":{"providerName":"wazuhcoverage-probe","channel":"wazuhcoverage-probe","eventID":"0"}}}'
+)
+EVENTCHANNEL_UNSUPPORTED = (
+    "wazuh-logtest cannot run the EventChannel decoder; replaying Windows events "
+    "needs rule 60000 set to <decoded_as>json</decoded_as> on this manager"
+)
 
 # What logtest is told when a finding carries no location, which happens for a
 # below_threshold finding and for an archive whose events had none.
@@ -138,8 +156,14 @@ def verify_findings(
 
     wazuhtester = _load_wazuhtester()
 
+    eventchannel_error = None
+    if any(finding.observed_decoder == EVENTCHANNEL_DECODER for finding in targets):
+        eventchannel_error = _eventchannel_replay_error(wazuhtester, log_format=log_format, socket_path=socket_path)
+
     return tuple(
-        _verify_one(
+        _unverified(finding, eventchannel_error)
+        if eventchannel_error is not None and finding.observed_decoder == EVENTCHANNEL_DECODER
+        else _verify_one(
             wazuhtester,
             finding,
             alert_threshold=alert_threshold,
@@ -148,6 +172,31 @@ def verify_findings(
         )
         for finding in targets
     )
+
+
+def _eventchannel_replay_error(wazuhtester: Any, *, log_format: str, socket_path: str | None) -> str | None:
+    """Return None when this manager can evaluate Windows rules on a replayed sample.
+
+    The probe matches rule 60000, or a child of it, only when that rule accepts
+    the generic JSON decoder. Anything else -- no rule, another rule, an error --
+    means a Windows sample would replay as uncovered whatever the ruleset holds,
+    which is exactly the verdict a replay must never invent.
+    """
+
+    try:
+        response = wazuhtester.send_log(
+            EVENTCHANNEL_PROBE,
+            location="EventChannel",
+            log_format=log_format,
+            socket_path=socket_path,
+        )
+    except Exception as exc:  # noqa: BLE001 - the probe failing is a reason, not a crash
+        return f"could not check EventChannel replay support: {type(exc).__name__}: {exc}"
+
+    status = getattr(response.status, "name", str(response.status))
+    if status == "RuleMatch" and "windows" in (response.rule_groups or ()):
+        return None
+    return EVENTCHANNEL_UNSUPPORTED
 
 
 def _verify_one(

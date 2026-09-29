@@ -10,7 +10,7 @@ The bucket is named for what the record proves — no alerting rule was attached
 
 When no replay is possible the report prints a note beside the findings, because an empty `Rule` and `Level` otherwise imply the stronger claim on their own. When a replay is possible the note is dropped, since the `Effective` line has answered the question the note exists to raise.
 
-`tests/test_analysis_integration.py` pins both the bucket name and the classification of a real archived EventChannel event that logtest resolves to rule `61100` at level 0.
+`tests/test_analysis_integration.py` pins both the bucket name and the classification of a real archived EventChannel event that logtest resolves to rule `61100` at level 0 on a manager whose rule 60000 accepts JSON (see [Verification through logtest](#location-and-what-could-not-be-derived)).
 
 ## Alert threshold resolution
 
@@ -32,7 +32,9 @@ The unit of replay is the finding, not the event. That is what grouping bought: 
 
 ### Location, and what could not be derived
 
-`Finding` carries `observed_location` because the decoder chain consults it. The location and other replay metadata are selected from the same deterministically chosen event as the representative sample, rather than independently from the group. `log_format` cannot be handled the same way, since the archive does not record it; it is a parameter with wazuh-logtest's own `syslog` default. Both are covered in [CAVEATS.md](CAVEATS.md#location-is-preserved-log-format-is-not).
+`Finding` carries `observed_location` because the decoder chain consults it. The location and other replay metadata are selected from the same deterministically chosen event as the representative sample, rather than independently from the group. `log_format` cannot be handled the same way, since the archive does not record it; it is a parameter with wazuh-logtest's own `syslog` default, although Wazuh 4.14's logtest only checks that it is present. Both are covered in [CAVEATS.md](CAVEATS.md#location-is-preserved-log-format-is-not).
+
+EventChannel findings add a precondition. wazuh-logtest cannot run the EventChannel decoder, so their samples decode as `json`, and Windows rules can match them only where rule 60000 has been changed to `<decoded_as>json</decoded_as>`. One minimal Windows record is replayed first; unless it matches a rule in the `windows` group, the EventChannel findings come back `unverified` with that reason instead of a false `uncovered`. The probe costs one round trip and runs only when EventChannel findings are selected.
 
 ### Failure is never a gap
 
