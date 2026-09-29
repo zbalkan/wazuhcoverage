@@ -27,8 +27,10 @@ DECODER_NAME = "windows_eventchannel"
 # example when one value reaches os_xml's 20,480-byte limit), so no key exists.
 NO_PAYLOAD_PATTERN = "EventChannel event without an XML payload"
 
-# Channel group rules in the stock ruleset (ruleset/rules/0575-win-base_rules.xml).
-# A rule for any other channel hangs off the base Windows rule.
+# Channel group rules in the stock 4.14 ruleset: the rules whose only field test
+# is win.system.channel (0575-win-base_rules.xml, 0620-win-generic_rules.xml,
+# 0915-win-powershell_rules.xml). A rule for any other channel hangs off the base
+# Windows rule.
 _BASE_RULE = "60000"
 _CHANNEL_RULES: Dict[str, str] = {  # noqa: UP006
     "Security": "60001",
@@ -37,6 +39,9 @@ _CHANNEL_RULES: Dict[str, str] = {  # noqa: UP006
     "Microsoft-Windows-Sysmon/Operational": "60004",
     "Microsoft-Windows-Windows Defender/Operational": "60005",
     "Microsoft-Windows-Windows Firewall With Advanced Security/Firewall": "60016",
+    "File Replication Service": "64100",
+    "Microsoft-Windows-TerminalServices-Gateway/Operational": "64104",
+    "Microsoft-Windows-PowerShell/Operational": "91801",
 }
 
 _PCRE2_SPECIALS = frozenset(r"\.^$|?*+()[]{}")
@@ -79,32 +84,36 @@ def install_eventchannel_macros(connection: DuckDBPyConnection) -> None:
     )
 
 
-def suggest_rule(sample_log: str) -> Optional[str]:
+def suggest_rule(sample_log: str, *, parent: Optional[str] = None) -> Optional[str]:
     """Return a rule skeleton for an EventChannel sample, or None without a key.
 
     The skeleton keys on the event ID under the channel's group rule, as the
     stock Windows rules do, and pins the provider because event IDs repeat
-    across providers within a channel.
+    across providers within a channel. A record without a provider gets none:
+    the base rule 60000 requires win.system.providerName, so no rule below it
+    could ever match such a record.
+
+    ``parent`` overrides the channel's group rule. Callers pass the rule a
+    replay matched, because Wazuh descends into the first matching child and a
+    new sibling of that rule would be shadowed by it.
     """
 
     fields = _key_fields(sample_log)
     if fields is None:
         return None
     channel, provider, event_id = fields
-    if event_id is None:
+    if event_id is None or not provider:
         return None
 
-    parent = _CHANNEL_RULES.get(channel or "", _BASE_RULE)
+    if parent is None:
+        parent = _CHANNEL_RULES.get(channel or "", _BASE_RULE)
     lines = [
         '<rule id="100000" level="3">',
         f"  <if_sid>{parent}</if_sid>",
         f'  <field name="win.system.eventID" type="pcre2">^{_escape_xml(_escape_pcre2(event_id))}$</field>',
+        f'  <field name="win.system.providerName" type="pcre2">^{_escape_xml(_escape_pcre2(provider))}$</field>',
     ]
-    if provider:
-        lines.append(
-            f'  <field name="win.system.providerName" type="pcre2">^{_escape_xml(_escape_pcre2(provider))}$</field>'
-        )
-    description = f"{channel or 'EventChannel'}: {provider or '-'} event {event_id}"
+    description = f"{channel or 'EventChannel'}: {provider} event {event_id}"
     lines.append(f"  <description>{_escape_xml(description)}</description>")
     lines.append("</rule>")
     return "\n".join(lines)

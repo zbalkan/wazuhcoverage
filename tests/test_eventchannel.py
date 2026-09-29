@@ -1,11 +1,12 @@
 import json
+from dataclasses import replace
 from pathlib import Path
 from typing import Dict, List, Optional  # noqa: UP035
 
 from wazuhcoverage import analyze_archive  # type: ignore
 from wazuhcoverage.eventchannel import NO_PAYLOAD_PATTERN, suggest_rule
 from wazuhcoverage.html_report import _render_finding
-from wazuhcoverage.models import Finding
+from wazuhcoverage.models import Finding, Verification
 from wazuhcoverage.report import _finding_rows
 
 
@@ -105,6 +106,20 @@ def test_rule_skeleton_for_an_unlisted_channel_uses_the_base_rule_and_escapes() 
     assert "^A&amp;B \\(x\\)$" in rule
 
 
+def test_powershell_channel_uses_its_own_group_rule() -> None:
+    rule = suggest_rule(_win_log("4104", 1, channel="Microsoft-Windows-PowerShell/Operational", provider="P"))
+
+    assert rule is not None
+    assert "<if_sid>91801</if_sid>" in rule
+
+
+def test_no_rule_skeleton_without_a_provider() -> None:
+    # Rule 60000 requires win.system.providerName, so nothing below it can match.
+    record = json.dumps({"win": {"system": {"channel": "Security", "eventID": "0"}}})
+
+    assert suggest_rule(record) is None
+
+
 def test_no_rule_skeleton_without_an_event_id() -> None:
     assert suggest_rule(_win_log(None, 1)) is None
     assert suggest_rule("not json") is None
@@ -146,3 +161,44 @@ def test_reports_offer_no_suggestion_for_an_eventchannel_record_without_a_key() 
 
     assert not any("Suggested" in row for row in _finding_rows(1, finding, None))
     assert "Suggested" not in _render_finding(finding, None)
+
+
+def _verification(state: str, rule_id: Optional[str]) -> Verification:
+    return Verification(
+        finding_key="key",
+        effective_state=state,
+        logtest_status="RuleMatch" if rule_id else "NoRule",
+        decoder="json",
+        rule_id=rule_id,
+        rule_level=0 if rule_id else None,
+        rule_description=None,
+        rule_groups=("windows",),
+        error=None,
+    )
+
+
+def test_a_replayed_match_becomes_the_parent_of_the_suggested_rule() -> None:
+    # Verified on Wazuh 4.14.8: a rule under 60002 for System 7036 never fires,
+    # because the stock level-0 sibling 61100 matches first.
+    finding = _eventchannel_finding(_win_log("7036", 1, channel="System", provider="Service Control Manager"))
+
+    rows = _finding_rows(1, finding, _verification("suppressed", "61100"))
+
+    suggestion = next(row for row in rows if "Suggested Wazuh rule" in row)
+    assert "<if_sid>61100</if_sid>" in suggestion
+
+
+def test_without_a_matched_rule_the_channel_group_rule_is_the_parent() -> None:
+    finding = _eventchannel_finding(_win_log("4624", 1))
+
+    for verification in (None, _verification("unverified", None), _verification("uncovered", None)):
+        suggestion = next(row for row in _finding_rows(1, finding, verification) if "Suggested Wazuh rule" in row)
+        assert "<if_sid>60001</if_sid>" in suggestion
+
+
+def test_no_suggestion_when_replay_shows_the_finding_already_alerts() -> None:
+    finding = _eventchannel_finding(_win_log("4104", 1, channel="Microsoft-Windows-PowerShell/Operational"))
+    alerting = replace(_verification("at_or_above_threshold", "91815"), rule_level=4)
+
+    assert not any("Suggested" in row for row in _finding_rows(1, finding, alerting))
+    assert "Suggested" not in _render_finding(finding, alerting)

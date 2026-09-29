@@ -153,7 +153,7 @@ def _finding_rows(index: int, finding: Finding, verification: Verification | Non
         rows.append(f"    Level: {presented.rule_level}")
     pattern = _single_row(finding.message_pattern)
     rows.append(f"    Pattern: {pattern}")
-    suggestion = suggest_for_finding(finding)
+    suggestion = suggest_for_finding(finding, verification)
     if suggestion is not None:
         heading, text = suggestion
         rows.append(f"    {heading}: {_single_row(text)}")
