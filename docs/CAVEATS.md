@@ -70,6 +70,8 @@ See [CLI.md](CLI.md#manager-replay) for the command-line behaviour.
 
 `wazuhcoverage` works from Wazuh JSON archives, not from `alerts.json`. Wazuh does not archive all events unless event archiving is enabled.
 
+An event the agent never delivers cannot appear in any archive. A Windows agent drops, rather than truncates, an event whose message exceeds 65,408 bytes after encoding (`src/os_crypto/shared/msgs.c:600-607`, `src/client-agent/sendmsg.c:38-42`), and the manager keeps only the rendered message of an EventChannel event with any single value of 20,480 bytes or more, because its XML parser rejects the whole event (`src/os_xml/os_xml.c:297-303`). The first kind is invisible to this analysis; the second is reported as `EventChannel event without an XML payload`.
+
 Configuration and storage details belong to the upstream [Archiving event logs](https://documentation.wazuh.com/current/user-manual/manager/event-logging.html#archiving-event-logs) documentation.
 
 ## Raising a level-0 rule changes more than the archive

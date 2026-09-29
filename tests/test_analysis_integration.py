@@ -658,8 +658,10 @@ def test_a_level_zero_match_is_archived_as_no_alerting_rule(tmp_path: Path) -> N
                     '{"win":{"system":{"providerName":"Service Control Manager",'
                     '"eventID":"7036","channel":"System",'
                     '"computer":"jumphost1.zaferbalkan.com",'
-                    '"message":"The Client License Service (ClipSVC) service '
-                    'entered the stopped state."}}}'
+                    # DecodeWinevt keeps the rendered message's JSON quotes
+                    # (analysisd/decoders/winevtchannel.c:683-691).
+                    '"message":"\\"The Client License Service (ClipSVC) service '
+                    'entered the stopped state.\\""}}}'
                 ),
             }
         ],
