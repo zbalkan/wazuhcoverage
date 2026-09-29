@@ -52,7 +52,15 @@ The archive's own `Rule` and `Level` stay in the report beside the `Effective` l
 
 Findings for `no_decoder` and `no_alerting_rule` group by a template mined with [drain3](https://github.com/IBM/Drain3). Masking alone is not enough: on the labelled corpus in `tools/tune_drain.py`, 6,400 events across sixteen log families reduce to 5,352 distinct masked messages, and mining turns those into 25 templates. A report with one finding per event is not a report.
 
-Mining is the only grouping engine and there is no flag to disable it, so two analyses of the same archive are always comparable.
+Mining is the grouping engine for text logs and there is no flag to disable it, so two analyses of the same archive are always comparable.
+
+### EventChannel records are grouped by field, not mined
+
+Windows EventChannel records are the exception. Wazuh does not archive them as text: analysisd's `DecodeWinevt` rebuilds the agent's XML as compact JSON and overwrites `full_log` with it (wazuh 4.14 `src/analysisd/decoders/winevtchannel.c:725-729`). Whitespace tokenization sees that JSON as one token for most of the `system` block, and that token carries the per-event `systemTime` and `eventRecordID`, so Drain gives nearly every record a cluster of its own. On the 37,364 records of EVTX-ATTACK-SAMPLES (150 channel/provider/event ID combinations) in that format, mining produced 35,218 findings.
+
+Records decoded by `windows_eventchannel` whose `full_log` is valid JSON therefore group by `(win.system.channel, win.system.providerName, win.system.eventID)`, and skip the preprocessor and Drain. This is the key the stock Windows rules are written against: 750 of their field conditions test `win.system.eventID`, under the channel group rules 60001 to 60005 and 60016. The same archive then yields exactly 150 findings with no event grouped under another type, in 0.68 s instead of 3.38 s. A record whose XML the manager could not parse carries no key -- `DecodeWinevt` then keeps only the rendered message -- and those records share one finding, `EventChannel event without an XML payload`. A windows_eventchannel record that is not JSON is mined like any other log.
+
+The key is deliberately coarse. Records of one event ID that a rule would separate by an `eventdata` field, such as logon types within 4624, share a finding. That matches the question the report answers -- which event has no rule -- and keeps the finding count bounded by the number of event types rather than by field values. For these findings the report suggests a rule skeleton on the event ID under the channel's group rule instead of a regex over the JSON text, which no Windows rule matches against.
 
 ### Parameters
 

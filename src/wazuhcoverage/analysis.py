@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, BinaryIO, List, Tuple  # noqa: UP035
 
 from wazuhcoverage.models import STATUSES, ArchiveAnalysis, Finding, LogTypeCount, StatusCount
+from wazuhcoverage.eventchannel import install_eventchannel_macros
 from wazuhcoverage.preprocessing import install_preprocessor
 
 try:
@@ -195,6 +196,7 @@ def _analyze(archive: Path, alert_threshold: int, skip_malformed: bool) -> Archi
         _create_events(connection, archive, skip_malformed=skip_malformed)
         _create_views(connection, alert_threshold)
         install_preprocessor(connection)
+        install_eventchannel_macros(connection)
         _create_template_map(connection, _build_template_miner())
         _create_finding_views(connection)
 
@@ -447,6 +449,11 @@ def _create_template_map(connection: DuckDBPyConnection, miner: TemplateMiner) -
     template text instead, so the same archive always produces the same
     grouping.
 
+    EventChannel records are not mined. Their full_log is compact JSON whose
+    first whitespace token carries per-event fields, so Drain would give each
+    record a cluster of its own; they group by channel, provider and event ID
+    instead (see ``wazuhcoverage.eventchannel``), and skip the preprocessor too.
+
     The mapping tables are always created, empty included, so the finding views
     join against a fixed shape whatever the archive contains.
     """
@@ -463,6 +470,7 @@ def _create_template_map(connection: DuckDBPyConnection, miner: TemplateMiner) -
         WHERE observed_status IN ('no_decoder', 'no_alerting_rule')
           AND full_log IS NOT NULL
           AND full_log <> ''
+          AND eventchannel_fields(decoder_name, full_log) IS NULL
         """
     )
     # One event per distinct message: the first, by position in the archive.
@@ -711,6 +719,10 @@ def _create_finding_views(connection: DuckDBPyConnection) -> None:
         SELECT
             c.*,
             lt.template_id,
+            CASE
+                WHEN c.observed_status <> 'below_threshold'
+                    THEN eventchannel_pattern(eventchannel_fields(c.decoder_name, c.full_log))
+            END AS eventchannel_pattern,
             -- A mined event always has a template. Should one ever miss it, the
             -- event still groups with the others of its exact message rather
             -- than collapsing into one finding with every other orphan.
@@ -752,6 +764,7 @@ def _create_finding_views(connection: DuckDBPyConnection) -> None:
             observed_status,
             finding_log_type,
             template_id,
+            eventchannel_pattern,
             orphan_hi,
             orphan_lo,
             rule_key,
@@ -778,7 +791,7 @@ def _create_finding_views(connection: DuckDBPyConnection) -> None:
                 }
             ) AS sample
         FROM finding_events
-        GROUP BY observed_status, finding_log_type, template_id, orphan_hi, orphan_lo, rule_key
+        GROUP BY observed_status, finding_log_type, template_id, eventchannel_pattern, orphan_hi, orphan_lo, rule_key
         """
     )
 
@@ -824,6 +837,7 @@ def _create_finding_views(connection: DuckDBPyConnection) -> None:
                 g.*,
                 CASE
                     WHEN g.observed_status = 'below_threshold' THEN concat('rule:', g.rule_key)
+                    WHEN g.eventchannel_pattern IS NOT NULL THEN g.eventchannel_pattern
                     ELSE coalesce(t.log_template, preprocess_log(g.sample.full_log))
                 END AS message_pattern
             FROM finding_groups g

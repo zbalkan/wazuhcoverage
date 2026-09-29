@@ -17,7 +17,7 @@ from wazuhcoverage.presentation import (
     outcome_counts,
     present_finding,
 )
-from wazuhcoverage.wazuh_regex import suggest_wazuh_regex
+from wazuhcoverage.wazuh_regex import suggest_for_finding
 
 _HTML_TEMPLATE = r"""<!DOCTYPE html>
 <html lang="en" data-theme="light">
@@ -695,11 +695,10 @@ def _render_finding(finding: Finding, verification: Verification | None) -> str:
     )
 
     regex_suggestion = ""
-    if finding.observed_status in ("no_decoder", "no_alerting_rule"):
-        regex_type, regex = suggest_wazuh_regex(finding.message_pattern)
-        regex_suggestion = (
-            f"<h4>Suggested Wazuh regex ({escape(regex_type)})</h4><pre><code>{escape(regex)}</code></pre>"
-        )
+    suggestion = suggest_for_finding(finding)
+    if suggestion is not None:
+        heading, text = suggestion
+        regex_suggestion = f"<h4>{escape(heading)}</h4><pre><code>{escape(text)}</code></pre>"
 
     return (
         '<details class="finding">'
