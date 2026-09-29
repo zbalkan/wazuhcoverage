@@ -695,7 +695,7 @@ def _render_finding(finding: Finding, verification: Verification | None) -> str:
     )
 
     regex_suggestion = ""
-    suggestion = suggest_for_finding(finding)
+    suggestion = suggest_for_finding(finding, verification)
     if suggestion is not None:
         heading, text = suggestion
         regex_suggestion = f"<h4>{escape(heading)}</h4><pre><code>{escape(text)}</code></pre>"
