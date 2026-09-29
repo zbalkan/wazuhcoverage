@@ -29,9 +29,9 @@ A level-0 replay match has effective state `suppressed` in the report. It also c
 
 ## Replay semantics
 
-Without replay, `no_alerting_rule` remains unresolved. It is never reinterpreted as `uncovered`.
+A `no_alerting_rule` finding without a verdict remains unresolved. It is never reinterpreted as `uncovered`.
 
-With replay, the representative finding count is moved from its observed archive state to the replayed effective state. The same adjusted counts are used by both report tables and metrics.
+The representative finding count is moved from its observed archive state to the replayed effective state. The same adjusted counts are used by both report tables and metrics.
 
 A failed replay contributes to uncertainty. It never contributes to uncovered coverage.
 

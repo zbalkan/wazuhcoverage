@@ -112,20 +112,14 @@ def _report_data(rendered: str) -> Dict:  # noqa: UP006
     return json.loads(payload)
 
 
-def test_archive_only_html_uses_observed_outcome_semantics_and_shows_caveat() -> None:
+def test_findings_without_a_verdict_keep_their_observed_outcome() -> None:
+    # There is one layout: replay verdicts where they exist, archive
+    # observations for the rest, with rule-less events left Unresolved.
     rendered = render_html_report(_analysis())
     data = _report_data(rendered)
 
-    assert data["outcome_names"] == ["Processed", "Dropped"]
-    assert data["outcomes"] == [
-        {"name": "Processed", "value": 6},
-        {"name": "Dropped", "value": 4},
-    ]
-    by_log_type = {row["name"]: row for row in data["log_types"]}
-    assert by_log_type["sshd"]["Processed"] == 6
-    assert by_log_type["sshd"]["Dropped"] == 2
-    assert by_log_type["auditd"]["Dropped"] == 2
-    assert "Archive ambiguity" in rendered
+    assert data["outcome_names"] == ["Processed", "Suppressed", "Dropped", "Unresolved"]
+    assert "Archive ambiguity" not in rendered
     assert "Without complete replay" in rendered
 
 

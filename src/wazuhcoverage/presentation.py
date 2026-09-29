@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Dict, Literal, Tuple  # noqa: UP035
 
-from wazuhcoverage.models import PROCESSED_STATUS, Finding, Verification
+from wazuhcoverage.models import Finding, Verification
 
 ResolvedOutcome = Literal[
     "Processed",
@@ -80,15 +80,8 @@ def finding_group(status: str) -> FindingGroup:
     return _FINDING_GROUP[status]
 
 
-def outcome_counts(statuses: Dict[str, int], *, resolved: bool) -> Dict[str, int]:  # noqa: UP006
-    """Aggregate statuses using archive-only or replay-resolved semantics."""
-
-    if not resolved:
-        processed = statuses.get(PROCESSED_STATUS, 0)
-        return {
-            "Processed": processed,
-            "Dropped": sum(statuses.values()) - processed,
-        }
+def outcome_counts(statuses: Dict[str, int]) -> Dict[str, int]:  # noqa: UP006
+    """Aggregate observed and effective statuses into the report's outcomes."""
 
     counts: Dict[str, int] = dict.fromkeys(RESOLVED_OUTCOMES, 0)  # noqa: UP006
     for status, count in statuses.items():

@@ -141,16 +141,16 @@ def test_partial_replay_does_not_turn_an_incomplete_uncovered_count_into_zero() 
     assert snapshot.uncovered_rate.ratio is None
 
 
-def test_uncovered_is_measurable_without_replay_when_no_ruleless_decoded_events_exist() -> None:
+def test_uncovered_is_measurable_when_nothing_needs_replay() -> None:
     analysis = ArchiveAnalysis(
         path=Path("/archives/clean.json"),
-        total_events=10,
+        total_events=9,
         malformed_lines=0,
         status_counts=(
-            StatusCount("at_or_above_threshold", 8, 80.0),
-            StatusCount("below_threshold", 1, 10.0),
+            StatusCount("at_or_above_threshold", 8, 88.9),
+            StatusCount("below_threshold", 1, 11.1),
             StatusCount("no_alerting_rule", 0, 0.0),
-            StatusCount("no_decoder", 1, 10.0),
+            StatusCount("no_decoder", 0, 0.0),
         ),
         log_type_counts=(),
         findings=(),

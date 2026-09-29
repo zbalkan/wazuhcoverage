@@ -281,7 +281,7 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
 
             <div class="grid">
                 <article>
-                    <header>__OUTCOME_TITLE__</header>
+                    <header>Effective outcomes</header>
                     <div id="outcome-chart" class="chart"></div>
                     <p class="chart-fallback">Chart unavailable. Use the outcome table below.</p>
                 </article>
@@ -331,7 +331,6 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
                 placeholder="Filter findings"
                 aria-label="Filter findings"
             >
-            __FINDINGS_NOTE__
             __FINDINGS__
         </section>
     </main>
@@ -499,8 +498,7 @@ def render_html_report(
 
     snapshot = calculate_metrics(analysis, verifications)
     statuses, log_types = resolve_effective_counts(analysis, verifications)
-    resolved = bool(verifications)
-    outcomes = outcome_counts(statuses, resolved=resolved)
+    outcomes = outcome_counts(statuses)
     chart_data = {
         "outcomes": [{"name": name, "value": count} for name, count in outcomes.items()],
         "outcome_names": list(outcomes),
@@ -509,7 +507,7 @@ def render_html_report(
             "uncovered": _contributors(snapshot, "uncovered"),
             "below_threshold": _contributors(snapshot, "below_threshold"),
         },
-        "log_types": _chart_log_types(log_types, resolved=resolved),
+        "log_types": _chart_log_types(log_types),
     }
 
     replacements = {
@@ -520,11 +518,9 @@ def render_html_report(
         "__THRESHOLD_SOURCE__": escape(threshold_source or "not supplied"),
         "__REPORT_DATE__": escape(datetime.now().astimezone().isoformat(timespec="seconds")),
         "__METRIC_CARDS__": _render_metric_cards(snapshot),
-        "__OUTCOME_TITLE__": "Effective outcomes" if resolved else "Archive outcomes",
         "__OUTCOME_TABLE__": _render_outcome_table(outcomes, analysis.total_events),
-        "__LOGTYPE_OUTCOME_TABLE__": _render_log_type_outcome_table(log_types, resolved=resolved),
+        "__LOGTYPE_OUTCOME_TABLE__": _render_log_type_outcome_table(log_types),
         "__LOGTYPE_TABLE__": _render_log_type_table(snapshot),
-        "__FINDINGS_NOTE__": _render_findings_note(analysis, verifications),
         "__FINDINGS__": _render_findings(analysis, verifications),
         "__REPORT_DATA__": _safe_json(chart_data),
     }
@@ -615,16 +611,14 @@ def _render_log_type_table(snapshot: MetricSnapshot) -> str:
 
 def _render_log_type_outcome_table(
     log_types: Dict[str | None, Dict[str, int]],  # noqa: UP006
-    *,
-    resolved: bool,
 ) -> str:
-    names = list(outcome_counts({}, resolved=resolved))
+    names = list(outcome_counts({}))
     rows = []
     for log_type, statuses in sorted(
         log_types.items(),
         key=lambda item: (-sum(item[1].values()), item[0] or ""),
     ):
-        outcomes = outcome_counts(statuses, resolved=resolved)
+        outcomes = outcome_counts(statuses)
         total = sum(outcomes.values())
         if not total:
             continue
@@ -713,26 +707,6 @@ def _render_finding(finding: Finding, verification: Verification | None) -> str:
     )
 
 
-def _render_findings_note(
-    analysis: ArchiveAnalysis,
-    verifications: Sequence[Verification],
-) -> str:
-    if verifications or not any(
-        item.status == "no_alerting_rule" and item.event_count for item in analysis.status_counts
-    ):
-        return ""
-
-    return (
-        '<article class="notice">'
-        "<strong>Archive ambiguity</strong>"
-        "<p>A no_alerting_rule event carries no rule in the archive. Wazuh can write "
-        "the same record when no rule matched, a level-0 rule matched, or a rule's "
-        "ignore window suppressed the match. Replay the representative sample through "
-        "wazuh-logtest to distinguish those states.</p>"
-        "</article>"
-    )
-
-
 class ContributorRow(TypedDict):
     name: str
     value: float
@@ -796,13 +770,11 @@ class ChartLogTypeRow(TypedDict):
 
 def _chart_log_types(
     log_types: Dict[str | None, Dict[str, int]],  # noqa: UP006
-    *,
-    resolved: bool,
 ) -> List[ChartLogTypeRow]:  # noqa: UP006
     rows: List[ChartLogTypeRow] = []  # noqa: UP006
 
     for log_type, statuses in log_types.items():
-        outcomes = outcome_counts(statuses, resolved=resolved)
+        outcomes = outcome_counts(statuses)
 
         rows.append(
             {
