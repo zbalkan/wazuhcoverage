@@ -1,8 +1,5 @@
 from pathlib import Path
 
-import pytest
-
-import wazuhcoverage
 from wazuhcoverage import (
     ArchiveAnalysis,  # type: ignore
     Finding,  # type: ignore
