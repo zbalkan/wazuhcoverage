@@ -87,7 +87,7 @@ for finding in analysis.findings:
         print(finding.event_count, finding.sample_log)
 ```
 
-`verify_findings(analysis, *, alert_threshold=3, statuses=("no_decoder", "no_alerting_rule"), log_format="syslog", socket_path=None)` replays one sample per selected finding and returns a `Verification` for each, in findings order. With at least one finding selected, it raises `RuntimeError` when replay cannot use the local `wazuh-logtest` socket, and `ValueError` for a negative threshold; with nothing to replay it returns an empty tuple without probing the socket. A failure on one sample is a result, not an exception: that finding comes back `unverified` with the error text and the rest still run.
+`verify_findings(analysis, *, alert_threshold=3, statuses=("no_decoder", "no_alerting_rule"), log_format="syslog", socket_path=None)` replays one sample per selected finding and returns a `Verification` for each, in findings order. With at least one finding selected, it raises `RuntimeError` when replay cannot use the local `wazuh-logtest` socket, and `ValueError` for a negative threshold; with nothing to replay it returns an empty tuple without probing the socket. A failure on one sample is a result, not an exception: that finding comes back `unverified` with the error text and the rest still run. When any selected finding comes from the EventChannel decoder, one probe record is replayed first; unless the manager's rule 60000 accepts JSON, those findings come back `unverified` with `verification.EVENTCHANNEL_UNSUPPORTED` as the error and are not replayed.
 
 Widen `statuses` to replay buckets the archive already resolved — useful for auditing whether the manager still behaves as the archive says, at the cost of a round trip per finding.
 

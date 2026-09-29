@@ -142,13 +142,9 @@ For a replayed finding, the CLI displays this effective state as its status and 
 
 Findings appear under Dropped, Processed, and, when needed, Unresolved headings. A suppressed or below-threshold finding belongs to Processed because a rule matched, even though it did not produce an alert. Each heading sorts findings by event count, largest first, and numbers them within that heading. The outcome table keeps Suppressed separate so its count is visible.
 
-Replay describes the manager used for the replay, which may not have the same ruleset as the manager that originally wrote the archive. A single-sample replay also cannot reproduce rules that require event history, and the archive does not preserve the original `log_format`. These limitations are explained in [CAVEATS.md](CAVEATS.md).
+Replay describes the manager used for the replay, which may not have the same ruleset as the manager that originally wrote the archive. A single-sample replay also cannot reproduce rules that require event history, and the archive does not preserve the original `log_format`, which wazuh-logtest in Wazuh 4.14 does not use to choose decoders anyway. These limitations are explained in [CAVEATS.md](CAVEATS.md).
 
-For JSON or EventChannel-style input, set the format explicitly when needed:
-
-```bash
-wazuhcoverage --log-format json /path/to/archive.json.gz
-```
+Windows EventChannel findings replay only on a manager whose rule 60000 uses `<decoded_as>json</decoded_as>`, because wazuh-logtest cannot run the EventChannel decoder. Without it they are reported as unverified with that reason; see [CAVEATS.md](CAVEATS.md#windows-eventchannel-replay-needs-rule-60000-to-accept-json).
 
 The `--no-stats` mode can also feed representative samples to a separate `wazuh-logtest` process, which is useful when analysis and replay happen on different hosts:
 

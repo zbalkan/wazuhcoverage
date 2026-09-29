@@ -294,3 +294,74 @@ def test_a_probe_that_raises_still_returns_a_reason(monkeypatch: MonkeyPatch) ->
 
     assert reason is not None
     assert "cannot read the socket" in reason
+
+
+def _eventchannel_finding(key: str) -> Finding:
+    return _finding(
+        key,
+        log_type="windows_eventchannel",
+        observed_decoder="windows_eventchannel",
+        observed_location="EventChannel",
+        sample_log='{"win":{"system":{"channel":"System","providerName":"P","eventID":"7036"}}}',
+    )
+
+
+def test_eventchannel_findings_replay_when_rule_60000_accepts_json(monkeypatch: MonkeyPatch) -> None:
+    tester = _install(
+        monkeypatch,
+        _FakeTester(
+            [
+                _response("RuleMatch", decoder="json", rule_id="60000", rule_level=0, rule_groups={"windows"}),
+                _response("RuleMatch", decoder="json", rule_id="61100", rule_level=0, rule_groups={"windows"}),
+            ]
+        ),
+    )
+
+    (result,) = verify_findings(_analysis(_eventchannel_finding("w")))
+
+    assert tester.calls[0]["log"] == verification_module.EVENTCHANNEL_PROBE
+    assert tester.calls[0]["location"] == "EventChannel"
+    assert tester.calls[1]["log"].startswith('{"win":')
+    assert (result.effective_state, result.rule_id) == ("suppressed", "61100")
+
+
+def test_eventchannel_findings_are_unverified_without_the_json_rule(monkeypatch: MonkeyPatch) -> None:
+    # A stock manager: the probe decodes as json and rule 60000 refuses it, so a
+    # replayed Windows sample would report "uncovered" whatever the ruleset holds.
+    tester = _install(
+        monkeypatch,
+        _FakeTester(
+            [
+                _response("NoRule", decoder="json"),
+                _response("NoRule", decoder="sshd"),
+            ]
+        ),
+    )
+
+    windows_a, text, windows_b = verify_findings(
+        _analysis(_eventchannel_finding("a"), _finding("t"), _eventchannel_finding("b"))
+    )
+
+    assert len(tester.calls) == 2  # one probe, one replay; no Windows sample was sent
+    assert tester.calls[1]["log"] == "sample for t"
+    for result in (windows_a, windows_b):
+        assert result.effective_state == "unverified"
+        assert result.error == verification_module.EVENTCHANNEL_UNSUPPORTED
+    assert text.effective_state == "uncovered"
+
+
+def test_a_probe_that_raises_leaves_eventchannel_findings_unverified(monkeypatch: MonkeyPatch) -> None:
+    _install(monkeypatch, _FakeTester([ConnectionError("gone")]))
+
+    (result,) = verify_findings(_analysis(_eventchannel_finding("w")))
+
+    assert result.effective_state == "unverified"
+    assert "ConnectionError: gone" in (result.error or "")
+
+
+def test_no_probe_without_eventchannel_findings(monkeypatch: MonkeyPatch) -> None:
+    tester = _install(monkeypatch, _FakeTester(_response("NoRule", decoder="sshd")))
+
+    verify_findings(_analysis(_finding("a"), _finding("b")))
+
+    assert [call["log"] for call in tester.calls] == ["sample for a", "sample for b"]
