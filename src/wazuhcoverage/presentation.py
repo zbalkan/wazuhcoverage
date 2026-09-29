@@ -8,50 +8,55 @@ from typing import Dict, Literal, Tuple  # noqa: UP035
 from wazuhcoverage.models import Finding, Verification
 
 ResolvedOutcome = Literal[
-    "Processed",
-    "Suppressed",
-    "Dropped",
-    "Unresolved",
+    "Rule matched, alerted",
+    "Rule matched, no alert",
+    "No rule",
+    "No decoder",
+    "Not verified",
 ]
 
-FindingGroup = Literal[
-    "Dropped",
-    "Processed",
-    "Unresolved",
-]
+ALERTED: ResolvedOutcome = "Rule matched, alerted"
+NO_ALERT: ResolvedOutcome = "Rule matched, no alert"
+NO_RULE: ResolvedOutcome = "No rule"
+NO_DECODER: ResolvedOutcome = "No decoder"
+NOT_VERIFIED: ResolvedOutcome = "Not verified"
 
+# Table and chart order: what happened to the events, from an alert down to
+# no verdict at all.
+RESOLVED_OUTCOMES: Tuple[ResolvedOutcome, ...] = (ALERTED, NO_ALERT, NO_RULE, NO_DECODER, NOT_VERIFIED)  # noqa: UP006
 
-RESOLVED_OUTCOMES: Tuple[ResolvedOutcome, ...] = (  # noqa: UP006
-    "Processed",
-    "Suppressed",
-    "Dropped",
-    "Unresolved",
-)
+# Finding order: the gaps someone can act on first.
+FINDING_GROUPS: Tuple[ResolvedOutcome, ...] = (NO_RULE, NO_DECODER, NO_ALERT, ALERTED, NOT_VERIFIED)  # noqa: UP006
 
-FINDING_GROUPS: Tuple[FindingGroup, ...] = (  # noqa: UP006
-    "Dropped",
-    "Processed",
-    "Unresolved",
-)
-
-_EFFECTIVE_OUTCOME: Dict[str, ResolvedOutcome] = {  # noqa: UP006
-    "at_or_above_threshold": "Processed",
-    "suppressed": "Suppressed",
-    "below_threshold": "Suppressed",
-    "no_decoder": "Dropped",
-    "uncovered": "Dropped",
-    "no_alerting_rule": "Unresolved",
-    "unverified": "Unresolved",
+# The statuses each outcome is made of, in the order their breakdown rows are
+# shown. A replay-resolved status and the archive status it stands in for map
+# to the same outcome; a rule-less record without a verdict is not verified.
+OUTCOME_STATUSES: Dict[ResolvedOutcome, Tuple[str, ...]] = {  # noqa: UP006
+    ALERTED: ("at_or_above_threshold",),
+    NO_ALERT: ("suppressed", "below_threshold"),
+    NO_RULE: ("uncovered",),
+    NO_DECODER: ("no_decoder",),
+    NOT_VERIFIED: ("no_alerting_rule", "unverified"),
 }
 
-_FINDING_GROUP: Dict[str, FindingGroup] = {  # noqa: UP006
-    "no_decoder": "Dropped",
-    "uncovered": "Dropped",
-    "at_or_above_threshold": "Processed",
-    "suppressed": "Processed",
-    "below_threshold": "Processed",
-    "no_alerting_rule": "Unresolved",
-    "unverified": "Unresolved",
+# Column headings where the full labels would not fit, such as one column per
+# outcome in the log-type table. They keep the full labels' order and wording.
+SHORT_LABELS: Dict[ResolvedOutcome, str] = {  # noqa: UP006
+    ALERTED: "Alerted",
+    NO_ALERT: "No alert",
+    NO_RULE: "No rule",
+    NO_DECODER: "No decoder",
+    NOT_VERIFIED: "Not verified",
+}
+
+# How a status reads in an outcome's breakdown rows.
+STATUS_LABELS: Dict[str, str] = {  # noqa: UP006
+    "suppressed": "level 0",
+    "below_threshold": "below threshold",
+}
+
+_EFFECTIVE_OUTCOME: Dict[str, ResolvedOutcome] = {  # noqa: UP006
+    status: outcome for outcome, statuses in OUTCOME_STATUSES.items() for status in statuses
 }
 
 
@@ -74,10 +79,10 @@ def effective_outcome(status: str) -> ResolvedOutcome:
     return _EFFECTIVE_OUTCOME[status]
 
 
-def finding_group(status: str) -> FindingGroup:
+def finding_group(status: str) -> ResolvedOutcome:
     """Return the Findings section for an observed or effective status."""
 
-    return _FINDING_GROUP[status]
+    return _EFFECTIVE_OUTCOME[status]
 
 
 def outcome_counts(statuses: Dict[str, int]) -> Dict[str, int]:  # noqa: UP006

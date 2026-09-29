@@ -1,3 +1,4 @@
+import re
 from dataclasses import replace
 from pathlib import Path
 from typing import List  # noqa: UP035
@@ -60,53 +61,57 @@ def _analysis() -> ArchiveAnalysis:
 
 def _rendered_log_type_rows(analysis: ArchiveAnalysis) -> List[str]:  # noqa: UP006
     lines = render_report(analysis).splitlines()
-    header = next(index for index, line in enumerate(lines) if line.startswith("Log type") and "Processed" in line)
+    header = next(index for index, line in enumerate(lines) if line.startswith("Log type") and "Alerted" in line)
     end = lines.index("", header + 1)
     return lines[header + 1 : end]
 
 
-def _rendered_outcome_rows(analysis: ArchiveAnalysis) -> List[str]:  # noqa: UP006
-    lines = render_report(analysis).splitlines()
-    header = next(index for index, line in enumerate(lines) if line.startswith("Outcome") and "% dropped" in line)
-    end = lines.index("", header + 1)
-    return lines[header + 1 : end]
+def _outcome_rows(text: str) -> List[List[str]]:  # noqa: UP006
+    """Return the outcome table as [label, events, % total] rows; labels contain spaces."""
+
+    lines = text.splitlines()
+    header = next(index for index, line in enumerate(lines) if line.startswith("Outcome") and "% total" in line)
+    end = lines.index("", header + 1) if "" in lines[header + 1 :] else len(lines)
+    return [re.split(r"\s{2,}", line.strip()) for line in lines[header + 1 : end]]
 
 
 def test_report_renders_outcome_and_log_type_tables() -> None:
     lines = render_report(_analysis()).splitlines()
 
-    header = next(line for line in lines if line.startswith("Outcome") and "% dropped" in line)
-    assert header.split() == ["Outcome", "Events", "%", "total", "%", "dropped"]
+    header = next(line for line in lines if line.startswith("Outcome") and "% total" in line)
+    assert header.split() == ["Outcome", "Events", "%", "total"]
 
-    log_types = next(line for line in lines if line.startswith("Log type") and "Processed" in line)
+    log_types = next(line for line in lines if line.startswith("Log type") and "Alerted" in line)
     assert log_types.split() == [
         "Log",
         "type",
         "Events",
         "%",
         "total",
-        "Processed",
-        "Suppressed",
-        "Dropped",
-        "Unresolved",
+        "Alerted",
+        "No",
+        "alert",
+        "No",
+        "rule",
+        "No",
+        "decoder",
+        "Not",
+        "verified",
     ]
 
 
 def test_events_without_a_verdict_keep_their_observed_outcome() -> None:
     # Findings that were not replayed, and buckets that are never replayed, are
     # placed by what the archive recorded: below_threshold matched a rule, so it
-    # is Suppressed; a rule-less event without a verdict stays Unresolved.
-    rows = [row.split() for row in _rendered_outcome_rows(_analysis())]
-
-    assert rows == [
-        ["Processed", "3", "30.00%", "-"],
-        ["Suppressed", "1", "10.00%", "-"],
-        ["suppressed", "0", "0.00%", "-"],
-        ["below_threshold", "1", "10.00%", "-"],
-        ["Dropped", "3", "30.00%", "100.00%"],
-        ["no_decoder", "3", "30.00%", "100.00%"],
-        ["uncovered", "0", "0.00%", "0.00%"],
-        ["Unresolved", "3", "30.00%", "-"],
+    # is a no-alert match; a rule-less event without a verdict is not verified.
+    assert _outcome_rows(render_report(_analysis())) == [
+        ["Rule matched, alerted", "3", "30.00%"],
+        ["Rule matched, no alert", "1", "10.00%"],
+        ["level 0", "0", "0.00%"],
+        ["below threshold", "1", "10.00%"],
+        ["No rule", "0", "0.00%"],
+        ["No decoder", "3", "30.00%"],
+        ["Not verified", "3", "30.00%"],
     ]
 
 
@@ -114,7 +119,7 @@ def test_log_type_table_groups_statuses_into_one_row_per_type() -> None:
     rows = _rendered_log_type_rows(_analysis())
 
     sshd = next(row for row in rows if row.startswith("sshd"))
-    assert sshd.split() == ["sshd", "6", "60.00%", "3", "1", "0", "2"]
+    assert sshd.split() == ["sshd", "6", "60.00%", "3", "1", "0", "0", "2"]
 
 
 def test_log_type_table_is_sorted_by_aggregate_event_count() -> None:
@@ -127,7 +132,7 @@ def test_report_renders_a_missing_log_type_as_a_dash() -> None:
     rows = _rendered_log_type_rows(_analysis())
 
     missing = next(row for row in rows if row.lstrip().startswith("-"))
-    assert missing.split() == ["-", "1", "10.00%", "0", "0", "0", "1"]
+    assert missing.split() == ["-", "1", "10.00%", "0", "0", "0", "0", "1"]
     assert not any("None" in row for row in rows)
 
 
@@ -325,9 +330,9 @@ def _verifications() -> tuple[Verification, ...]:
 def test_a_verified_report_names_the_rule_the_archive_omitted() -> None:
     text = render_report(_verified_analysis(), _verifications())
 
-    assert text.index("Dropped\n-------") < text.index("Processed\n---------")
+    assert text.index("No rule\n-------") < text.index("Rule matched, no alert\n----------------------")
     assert "[1] uncovered | sshd" in text
-    uncovered = text.split("[1] uncovered | sshd", 1)[1].split("Processed\n---------", 1)[0]
+    uncovered = text.split("[1] uncovered | sshd", 1)[1].split("Rule matched, no alert\n", 1)[0]
     suppressed = text.split("[1] suppressed | windows_eventchannel", 1)[1]
     assert "    Rule: 61100\n    Level: 0\n" in suppressed
     assert "no_alerting_rule" not in suppressed
@@ -354,25 +359,23 @@ def test_the_effective_table_weights_states_by_events() -> None:
 def test_replayed_summary_separates_suppressed_from_dropped() -> None:
     text = render_report(_verified_analysis(), _verifications())
     lines = text.splitlines()
-    start = lines.index("Outcome")
-    rows = [line.split() for line in lines[start + 3 : start + 11]]
+    rows = _outcome_rows(text)
 
     assert rows == [
-        ["Processed", "3", "5.66%", "-"],
-        ["Suppressed", "40", "75.47%", "-"],
-        ["suppressed", "40", "75.47%", "-"],
-        ["below_threshold", "0", "0.00%", "-"],
-        ["Dropped", "10", "18.87%", "100.00%"],
-        ["no_decoder", "0", "0.00%", "0.00%"],
-        ["uncovered", "10", "18.87%", "100.00%"],
-        ["Unresolved", "0", "0.00%", "-"],
+        ["Rule matched, alerted", "3", "5.66%"],
+        ["Rule matched, no alert", "40", "75.47%"],
+        ["level 0", "40", "75.47%"],
+        ["below threshold", "0", "0.00%"],
+        ["No rule", "10", "18.87%"],
+        ["No decoder", "0", "0.00%"],
+        ["Not verified", "0", "0.00%"],
     ]
-    assert sum(int(rows[index][1]) for index in (0, 1, 4, 7)) == 53
+    assert sum(int(rows[index][1]) for index in (0, 1, 4, 5, 6)) == 53
     start = lines.index("Log types")
     log_types = [line.split() for line in lines[start + 3 : start + 5]]
     assert log_types == [
-        ["windows_eventchannel", "40", "75.47%", "0", "40", "0", "0"],
-        ["sshd", "13", "24.53%", "3", "0", "10", "0"],
+        ["windows_eventchannel", "40", "75.47%", "0", "40", "0", "0", "0"],
+        ["sshd", "13", "24.53%", "3", "0", "10", "0", "0"],
     ]
 
 
@@ -387,8 +390,8 @@ def test_replay_decoder_replaces_archive_decoder_and_log_type() -> None:
     start = lines.index("Log types")
     log_types = [line.split() for line in lines[start + 3 : start + 5]]
     assert log_types == [
-        ["auditd", "40", "75.47%", "0", "40", "0", "0"],
-        ["sshd", "13", "24.53%", "3", "0", "10", "0"],
+        ["auditd", "40", "75.47%", "0", "40", "0", "0", "0"],
+        ["sshd", "13", "24.53%", "3", "0", "10", "0", "0"],
     ]
 
 
@@ -403,12 +406,15 @@ def test_findings_sort_by_event_count_within_each_outcome() -> None:
         observed_rule_level=5,
     )
     text = render_report(replace(base, findings=base.findings + (smaller_processed,)), _verifications())
-    processed = text.split("\nProcessed\n---------\n", 1)[1]
+    no_alert = text.split("\nRule matched, no alert\n", 1)[1]
+    alerted = text.split("\nRule matched, alerted\n", 1)[1]
 
-    assert processed.index("[1] suppressed | windows_eventchannel") < processed.index(
-        "[2] at_or_above_threshold | sshd"
+    assert "[1] suppressed | windows_eventchannel" in no_alert.split("\nRule matched, alerted\n", 1)[0]
+    assert alerted.startswith("---------------------\n[1] at_or_above_threshold | sshd")
+    # Gaps come first: they are what someone can act on.
+    assert (
+        text.index("\nNo rule\n") < text.index("\nRule matched, no alert\n") < text.index("\nRule matched, alerted\n")
     )
-    assert text.index("\nDropped\n-------\n") < text.index("\nProcessed\n---------\n")
 
 
 def test_below_threshold_replay_is_suppressed_not_dropped() -> None:
@@ -422,12 +428,12 @@ def test_below_threshold_replay_is_suppressed_not_dropped() -> None:
 
     assert "[1] below_threshold | windows_eventchannel" in text
     assert "    Rule: 100210\n    Level: 2\n" in text
-    rows = text.splitlines()
-    start = rows.index("Outcome")
-    assert rows[start + 4].split() == ["Suppressed", "40", "75.47%", "-"]
-    assert rows[start + 6].split() == ["below_threshold", "40", "75.47%", "-"]
-    assert rows[start + 7].split() == ["Dropped", "0", "0.00%", "-"]
-    assert rows[start + 10].split() == ["Unresolved", "10", "18.87%", "-"]
+    rows = {row[0]: row[1:] for row in _outcome_rows(text)}
+    assert rows["Rule matched, no alert"] == ["40", "75.47%"]
+    assert rows["below threshold"] == ["40", "75.47%"]
+    assert rows["No rule"] == ["0", "0.00%"]
+    assert rows["No decoder"] == ["0", "0.00%"]
+    assert rows["Not verified"] == ["10", "18.87%"]
 
 
 def test_an_unverified_finding_says_why() -> None:
@@ -450,9 +456,8 @@ def test_an_unverified_finding_says_why() -> None:
     assert "[2] unverified | sshd" in text
     assert "Replay: the logtest daemon reported an error for this sample" in text
     assert "[1] no_alerting_rule | windows_eventchannel" in text
-    lines = text.splitlines()
-    start = lines.index("Outcome")
-    assert lines[start + 10].split() == ["Unresolved", "50", "94.34%", "-"]
+    rows = {row[0]: row[1:] for row in _outcome_rows(text)}
+    assert rows["Not verified"] == ["50", "94.34%"]
 
 
 def test_a_verified_report_is_still_plain_ascii() -> None:

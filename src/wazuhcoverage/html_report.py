@@ -7,7 +7,7 @@ import re
 from collections.abc import Sequence
 from datetime import datetime
 from html import escape
-from typing import Dict, List, Tuple, TypedDict  # noqa: UP035
+from typing import Any, Dict, List, Tuple, TypedDict  # noqa: UP035
 
 from wazuhcoverage.metrics import MetricSnapshot, MetricValue, calculate_metrics, resolve_effective_counts
 from wazuhcoverage.models import ArchiveAnalysis, Finding, Verification
@@ -538,7 +538,7 @@ def _render_metric_cards(snapshot: MetricSnapshot) -> str:
         ("Decoder failure", snapshot.decoder_failure_rate),
         ("Uncovered", snapshot.uncovered_rate),
         ("Below threshold", snapshot.below_threshold_rate),
-        ("Unresolved", snapshot.uncertainty_rate),
+        ("Not verified", snapshot.uncertainty_rate),
     )
     return "\n".join(_render_metric_card(label, metric) for label, metric in metrics)
 
@@ -759,33 +759,15 @@ def _contributors(
     return rows[:10]
 
 
-class ChartLogTypeRow(TypedDict):
-    name: str
-    total: int
-    Processed: int
-    Suppressed: int
-    Dropped: int
-    Unresolved: int
-
-
 def _chart_log_types(
     log_types: Dict[str | None, Dict[str, int]],  # noqa: UP006
-) -> List[ChartLogTypeRow]:  # noqa: UP006
-    rows: List[ChartLogTypeRow] = []  # noqa: UP006
+) -> List[Dict[str, Any]]:  # noqa: UP006
+    """One chart row per log type: its name, total and a count per outcome label."""
 
+    rows: List[Dict[str, Any]] = []  # noqa: UP006
     for log_type, statuses in log_types.items():
         outcomes = outcome_counts(statuses)
-
-        rows.append(
-            {
-                "name": log_type or "(none)",
-                "Processed": outcomes.get("Processed", 0),
-                "Suppressed": outcomes.get("Suppressed", 0),
-                "Dropped": outcomes.get("Dropped", 0),
-                "Unresolved": outcomes.get("Unresolved", 0),
-                "total": sum(outcomes.values()),
-            }
-        )
+        rows.append({"name": log_type or "(none)", **outcomes, "total": sum(outcomes.values())})
 
     rows.sort(key=lambda item: (-item["total"], item["name"]))
     return rows[:20]
