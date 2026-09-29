@@ -13,8 +13,8 @@ from contextlib import ExitStack, contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, BinaryIO, List, Tuple  # noqa: UP035
 
-from wazuhcoverage.models import STATUSES, ArchiveAnalysis, Finding, LogTypeCount, StatusCount
 from wazuhcoverage.eventchannel import install_eventchannel_macros
+from wazuhcoverage.models import STATUSES, ArchiveAnalysis, Finding, LogTypeCount, StatusCount
 from wazuhcoverage.preprocessing import install_preprocessor
 
 try:

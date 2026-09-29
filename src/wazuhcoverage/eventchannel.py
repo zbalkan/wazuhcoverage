@@ -68,7 +68,7 @@ def install_eventchannel_macros(connection: DuckDBPyConnection) -> None:
     )
 
 
-def suggest_rule(sample_log: str, *, parent: str) -> Optional[str]:
+def suggest_rule(sample_log: str, *, parent: str) -> Optional[str]:  # noqa: UP045
     """Return a rule skeleton for an EventChannel sample, or None without a key.
 
     The skeleton keys on the event ID, as the stock Windows rules do, and pins
@@ -100,7 +100,7 @@ def suggest_rule(sample_log: str, *, parent: str) -> Optional[str]:
     return "\n".join(lines)
 
 
-def _key_fields(sample_log: str) -> Optional[Tuple[Optional[str], Optional[str], Optional[str]]]:  # noqa: UP006
+def _key_fields(sample_log: str) -> Optional[Tuple[Optional[str], Optional[str], Optional[str]]]:  # noqa: UP006, UP045
     try:
         system = json.loads(sample_log)["win"]["system"]
     except (ValueError, KeyError, TypeError):

@@ -42,7 +42,7 @@ _PCRE2_SPECIALS = frozenset(r"\.^$|?*+()[]{}")
 def suggest_for_finding(
     finding: Finding,
     verification: Verification | None = None,
-) -> Optional[Tuple[str, str]]:  # noqa: UP006
+) -> Optional[Tuple[str, str]]:  # noqa: UP006, UP045
     """Return a heading and a best-effort suggestion for an unresolved finding.
 
     EventChannel findings get a rule skeleton keyed on their fields, because

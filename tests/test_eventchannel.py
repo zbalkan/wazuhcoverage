@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import json
 from dataclasses import replace
 from pathlib import Path
@@ -11,7 +13,7 @@ from wazuhcoverage.report import _finding_rows
 
 
 def _win_log(
-    event_id: Optional[str],
+    event_id: Optional[str],  # noqa: UP045
     record_id: int,
     *,
     channel: str = "Security",
@@ -136,7 +138,7 @@ def _eventchannel_finding(sample: str) -> Finding:
     )
 
 
-def _verification(state: str, rule_id: Optional[str]) -> Verification:
+def _verification(state: str, rule_id: Optional[str]) -> Verification:  # noqa: UP045
     return Verification(
         finding_key="key",
         effective_state=state,
