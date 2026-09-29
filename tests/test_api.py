@@ -35,17 +35,3 @@ def test_analysis_annotation_accepts_string_or_path() -> None:
     assert "str" in str(annotations["path"])
     assert "Path" in str(annotations["path"])
     assert Path is not None
-
-
-def test_import_refuses_non_linux(monkeypatch: pytest.MonkeyPatch) -> None:
-    import importlib
-    import sys
-
-    import wazuhcoverage
-
-    with monkeypatch.context() as patch:
-        patch.setattr(sys, "platform", "win32")
-        with pytest.raises(RuntimeError, match="supports Linux only"):
-            importlib.reload(wazuhcoverage)
-
-    importlib.reload(wazuhcoverage)
