@@ -48,9 +48,6 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Compatibility shim for 0.9.0 only: keep existing wazuhcoverage[logtest]
-# commands warning-free. Remove this empty extra in the next release.
-logtest = []
 test = [
   "pytest>=8,<10",
 ]

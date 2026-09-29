@@ -22,7 +22,7 @@ def test_public_api_is_available_from_package() -> None:
     assert callable(calculate_metrics)
     assert callable(metrics_to_dict)
     assert wazuhcoverage.DEFAULT_ALERT_THRESHOLD == 3  # type: ignore
-    assert wazuhcoverage.__version__ == "0.9.0"  # type: ignore
+    assert wazuhcoverage.__version__ == "0.10.0"  # type: ignore
     assert ArchiveAnalysis.__module__ == "wazuhcoverage.models"
     assert Finding.__module__ == "wazuhcoverage.models"
     assert LogTypeCount.__module__ == "wazuhcoverage.models"
