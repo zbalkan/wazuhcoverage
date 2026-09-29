@@ -22,7 +22,6 @@ from wazuhcoverage.analysis import DEFAULT_ALERT_THRESHOLD, analyze_archive
 from wazuhcoverage.config import DEFAULT_OSSEC_CONF, read_alert_threshold
 from wazuhcoverage.html_report import render_html_report
 from wazuhcoverage.metrics import calculate_metrics, metrics_to_dict
-from wazuhcoverage.models import Verification
 from wazuhcoverage.report import render_report
 from wazuhcoverage.targets import resolve_targets
 from wazuhcoverage.verification import DEFAULT_LOG_FORMAT, unavailable_reason, verify_findings
@@ -37,6 +36,9 @@ STDIN_TARGET = "-"
 # substituted at render time; the analysis itself still carries the real path
 # it scanned.
 STDIN_LABEL = Path("<stdin>")
+
+# The exit status when no Wazuh manager answers on the logtest socket.
+EXIT_NO_MANAGER = 3
 
 # gzip's magic number. DuckDB picks its decompressor from the file extension,
 # so a spooled stream has to be named for what it actually contains.
@@ -157,8 +159,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=DEFAULT_LOG_FORMAT,
         metavar="FORMAT",
         help=(
-            "Log format reported to wazuh-logtest when replaying, e.g. syslog or json. "
-            f"Default: {DEFAULT_LOG_FORMAT}. Ignored when no manager is reachable."
+            f"Log format reported to wazuh-logtest when replaying, e.g. syslog or json. Default: {DEFAULT_LOG_FORMAT}."
         ),
     )
     parser.add_argument(
@@ -206,22 +207,15 @@ def _run(args: argparse.Namespace) -> int:
         print("wazuhcoverage: no files matched the supplied targets", file=sys.stderr)
         return 2
 
-    # Replay is best effort and decided once, before any archive is read: the
-    # answer is the same for every one of them, and a reader who is told at the
-    # top that the effective column is missing will not spend the rest of the
-    # report wondering where it went.
+    # Replay is required, and checked once before any archive is read. An
+    # archive alone cannot tell an unmatched event from a suppressed one, so a
+    # report without the manager's verdict would state coverage it cannot
+    # support.
     reason = unavailable_reason()
-    replay = reason is None
-    alert_threshold, threshold_source = _resolve_alert_threshold()
     if reason is not None:
-        # Two lines rather than one: the reason can be long, and the
-        # consequence is the part a reader has to act on.
-        print(f"wazuhcoverage: manager replay unavailable: {reason}", file=sys.stderr)
-        print(
-            "wazuhcoverage: producing an archive-only report, which cannot tell "
-            "an unmatched event from a suppressed one; see docs/CAVEATS.md",
-            file=sys.stderr,
-        )
+        print(f"wazuhcoverage: a reachable Wazuh manager is required: {reason}", file=sys.stderr)
+        return EXIT_NO_MANAGER
+    alert_threshold, threshold_source = _resolve_alert_threshold()
 
     processed = 0
     failed = 0
@@ -234,7 +228,7 @@ def _run(args: argparse.Namespace) -> int:
             with _spooled_stdin() as spooled:
                 if spooled.stat().st_size == 0:
                     print("wazuhcoverage: read 0 bytes from stdin", file=sys.stderr)
-                _report_one(spooled, STDIN_LABEL, args, replay, alert_threshold, threshold_source)
+                _report_one(spooled, STDIN_LABEL, args, alert_threshold, threshold_source)
         except BrokenPipeError:
             _suppression_broken_stdout()
             return 1
@@ -249,7 +243,7 @@ def _run(args: argparse.Namespace) -> int:
         print(f"Processing {archive}", file=sys.stderr)
 
         try:
-            _report_one(archive, archive, args, replay, alert_threshold, threshold_source)
+            _report_one(archive, archive, args, alert_threshold, threshold_source)
             processed += 1
 
         except BrokenPipeError:
@@ -364,7 +358,6 @@ def _report_one(
     archive: Path,
     label: Path,
     args: argparse.Namespace,
-    replay: bool,
     alert_threshold: int,
     threshold_source: str,
 ) -> None:
@@ -380,13 +373,11 @@ def _report_one(
         skip_malformed=not args.strict,
     )
 
-    verifications: Tuple[Verification, ...] = ()  # noqa: UP006
-    if replay:
-        verifications = verify_findings(
-            analysis,
-            alert_threshold=alert_threshold,
-            log_format=args.log_format,
-        )
+    verifications = verify_findings(
+        analysis,
+        alert_threshold=alert_threshold,
+        log_format=args.log_format,
+    )
 
     # Surface the loss on stderr too: with --no-stats the report that carries
     # this count is never rendered, and a silently shrunken denominator is
