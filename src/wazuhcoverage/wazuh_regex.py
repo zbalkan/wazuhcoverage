@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import re
-from typing import Tuple  # noqa: UP035
+from typing import TYPE_CHECKING, Optional, Tuple  # noqa: UP035
 
+from wazuhcoverage import eventchannel
 from wazuhcoverage.preprocessing import WAZUH_TIMESTAMP_PCRE2
+
+if TYPE_CHECKING:
+    from wazuhcoverage.models import Finding
 
 _PLACEHOLDER_RE = re.compile(r"(<\*>|<TIMESTAMP>|<UUID>|<HEX>|<NUM>)")
 _OSREGEX_UNREPRESENTABLE = frozenset("^*+")
@@ -27,6 +31,27 @@ _PCRE2_PLACEHOLDERS = {
     "<TIMESTAMP>": WAZUH_TIMESTAMP_PCRE2,
 }
 _PCRE2_SPECIALS = frozenset(r"\.^$|?*+()[]{}")
+
+
+def suggest_for_finding(finding: Finding) -> Optional[Tuple[str, str]]:  # noqa: UP006
+    """Return a heading and a best-effort suggestion for an unresolved finding.
+
+    EventChannel findings get a rule skeleton keyed on their fields, because
+    Wazuh's Windows rules match decoded fields rather than the JSON text. A
+    finding with no key to offer (for example an EventChannel record whose XML
+    the manager could not parse) gets None, as does any resolved finding.
+    """
+
+    if finding.observed_status not in ("no_decoder", "no_alerting_rule"):
+        return None
+    if finding.observed_decoder == eventchannel.DECODER_NAME:
+        rule = eventchannel.suggest_rule(finding.sample_log)
+        return None if rule is None else ("Suggested Wazuh rule (eventchannel)", rule)
+    # Line breaks only: a pattern is matched against one log line, and runs of
+    # spaces inside it are literal text the regex must keep.
+    pattern = finding.message_pattern.replace("\r", " ").replace("\n", " ").strip()
+    regex_type, regex = suggest_wazuh_regex(pattern)
+    return f"Suggested Wazuh regex ({regex_type})", regex
 
 
 def suggest_wazuh_regex(message_pattern: str) -> Tuple[str, str]:  # noqa: UP006

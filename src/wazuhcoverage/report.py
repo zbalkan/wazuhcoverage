@@ -21,7 +21,7 @@ from wazuhcoverage.presentation import (
     outcome_counts,
     present_finding,
 )
-from wazuhcoverage.wazuh_regex import suggest_wazuh_regex
+from wazuhcoverage.wazuh_regex import suggest_for_finding
 
 _PROCESSED_LABEL = "Processed"
 _DROPPED_LABEL = "Dropped"
@@ -153,9 +153,10 @@ def _finding_rows(index: int, finding: Finding, verification: Verification | Non
         rows.append(f"    Level: {presented.rule_level}")
     pattern = _single_row(finding.message_pattern)
     rows.append(f"    Pattern: {pattern}")
-    if finding.observed_status in ("no_decoder", "no_alerting_rule"):
-        regex_type, regex = suggest_wazuh_regex(pattern)
-        rows.append(f"    Suggested Wazuh regex ({regex_type}): {regex}")
+    suggestion = suggest_for_finding(finding)
+    if suggestion is not None:
+        heading, text = suggestion
+        rows.append(f"    {heading}: {_single_row(text)}")
     rows.append(f"    Sample: {finding.sample_log}")
     if presented.rule_description:
         rows.append(f"    Matched: {_single_row(presented.rule_description)}")

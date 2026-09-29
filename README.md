@@ -77,7 +77,7 @@ Metrics begin at the archive boundary. They do not measure events that should ha
 
 Raw event counts are usually too noisy to act on directly. `wazuhcoverage` therefore groups dropped events into findings.
 
-`below_threshold` events group by rule ID. `no_decoder` and `no_alerting_rule` events group by log type and a mined message template. Each finding contains its event count, affected agents, observed time range, decoder/rule information where available, a message pattern, and one real source log.
+`below_threshold` events group by rule ID. `no_decoder` and `no_alerting_rule` events group by log type and a mined message template, except Windows EventChannel records, which group by channel, provider and event ID. Each finding contains its event count, affected agents, observed time range, decoder/rule information where available, a message pattern, and one real source log.
 
 The sample is retained for validation and replay rather than reconstructed from parsed fields. Grouping is deterministic for the same archive. The mining strategy, measurements, and trade-offs are documented in [DESIGN.md](docs/DESIGN.md#template-mining).
 
