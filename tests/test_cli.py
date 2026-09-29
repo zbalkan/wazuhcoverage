@@ -594,9 +594,9 @@ def test_a_reachable_daemon_is_used_without_being_asked(
     assert "reporting from the archive alone" not in capsys.readouterr().err
 
 
-def test_an_unusable_daemon_warns_once_and_keeps_going(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys) -> None:
-    # A missing local manager still gets an archive-only coverage report, with
-    # the socket problem stated once before processing begins.
+def test_without_a_manager_nothing_is_analyzed(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys) -> None:
+    # An archive alone cannot tell an unmatched event from a suppressed one, so
+    # there is no archive-only report to fall back to.
     first = tmp_path / "a.json.gz"
     second = tmp_path / "b.json.gz"
     first.touch()
@@ -604,23 +604,20 @@ def test_an_unusable_daemon_warns_once_and_keeps_going(monkeypatch: pytest.Monke
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(cli, "resolve_targets", lambda _targets: [first, second])
-    monkeypatch.setattr(cli, "analyze_archive", lambda path, **_kwargs: _analysis(Path(path)))
+    monkeypatch.setattr(cli, "analyze_archive", lambda *_args, **_kwargs: pytest.fail("must not analyze"))
     monkeypatch.setattr(
         cli,
         "unavailable_reason",
         lambda: "the wazuh-logtest socket at /var/ossec/queue/sockets/logtest is not answering",
     )
     monkeypatch.setattr(cli, "verify_findings", lambda *_args, **_kwargs: pytest.fail("must not replay"))
-    monkeypatch.setattr(cli, "render_report", lambda _analysis, _verifications=(), **_kwargs: "report\n")
 
-    assert cli.main([str(first), str(second)]) == 0
+    assert cli.main([str(first), str(second)]) == cli.EXIT_NO_MANAGER
 
     captured = capsys.readouterr()
-    assert captured.out == "report\nreport\n"
-    assert captured.err.count("producing an archive-only report") == 1
+    assert captured.out == ""
+    assert captured.err.count("a reachable Wazuh manager is required") == 1
     assert "wazuh-logtest socket" in captured.err
-    assert "docs/CAVEATS.md" in captured.err
-    assert "Processed: 2 | Failed: 0" in captured.err
 
 
 def test_the_daemon_is_probed_once_not_per_archive(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys) -> None:
@@ -662,7 +659,6 @@ def test_the_probe_happens_before_the_first_archive_is_read(
 
     def unavailable_reason():
         order.append("probe")
-        return "no socket"
 
     monkeypatch.setattr(cli, "analyze_archive", analyze)
     monkeypatch.setattr(cli, "unavailable_reason", unavailable_reason)
@@ -674,13 +670,15 @@ def test_the_probe_happens_before_the_first_archive_is_read(
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="Wazuh Manager is not supported on Windows")
-def test_offline_run_assumes_wazuh_default_threshold(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys) -> None:
+def test_an_unreadable_config_assumes_wazuh_default_threshold(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys
+) -> None:
+    # The socket can answer while ossec.conf stays unreadable to this user.
     archive = tmp_path / "archive.json.gz"
     archive.touch()
     analyzed: List[Dict] = []  # noqa: UP006
 
     monkeypatch.setattr(cli, "resolve_targets", lambda _targets: [archive])
-    monkeypatch.setattr(cli, "unavailable_reason", lambda: "no manager")
     monkeypatch.setattr(
         cli,
         "read_alert_threshold",

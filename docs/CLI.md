@@ -80,6 +80,7 @@ With `--json`, stdout contains one JSON object per archive. A multi-target run t
 | `0` | Every matched archive was processed. |
 | `1` | At least one archive failed, or a downstream pipe closed early. |
 | `2` | No target was supplied or matched. |
+| `3` | No Wazuh manager answers on the local `wazuh-logtest` socket; no archive was read. |
 | `143` | The run received SIGTERM. It stops at once and removes its temporary files first. |
 
 `--version` prints `wazuhcoverage <version>` to stdout and exits `0` without requiring a target. The version comes from the installed distribution. Combining `--version` with other flags prints a warning because those flags are not used.
@@ -123,7 +124,7 @@ A finding represents a group of similar uncovered events. It includes event coun
 
 ## Manager replay
 
-An archive alone cannot always distinguish an event that was genuinely unmatched from one that was deliberately quiet. The CLI automatically replays one representative sample per relevant finding through the local `wazuh-logtest` socket when that socket is reachable. If the socket is absent, not answering, or not permitted, the CLI states the reason and produces an archive-only report.
+An archive alone cannot always distinguish an event that was genuinely unmatched from one that was deliberately quiet. The CLI replays one representative sample per relevant finding through the local `wazuh-logtest` socket, and requires it. If the socket is absent, not answering, or not permitted, the CLI states the reason and exits with status `3` before reading any archive.
 
 The replay provides an effective state for the representative sample:
 

@@ -46,10 +46,10 @@ def suggest_for_finding(
     """Return a heading and a best-effort suggestion for an unresolved finding.
 
     EventChannel findings get a rule skeleton keyed on their fields, because
-    Wazuh's Windows rules match decoded fields rather than the JSON text. When a
-    replay names the rule the sample reaches today, the skeleton descends from
-    that rule, since a sibling of it would never be evaluated; otherwise it
-    descends from the channel's group rule. A finding with no key to offer (for
+    Wazuh's Windows rules match decoded fields rather than the JSON text. The
+    skeleton descends from the rule a replay matched, since a sibling of it
+    would never be evaluated, and is offered only when there is one. A finding
+    with no key to offer (for
     example an EventChannel record whose XML the manager could not parse) gets
     None, as does any resolved finding, including one a replay showed already
     alerts.
@@ -60,10 +60,12 @@ def suggest_for_finding(
     if verification is not None and verification.effective_state == "at_or_above_threshold":
         return None
     if finding.observed_decoder == eventchannel.DECODER_NAME:
-        parent = None
-        if verification is not None and verification.effective_state in _MATCHED_STATES:
-            parent = verification.rule_id
-        rule = eventchannel.suggest_rule(finding.sample_log, parent=parent)
+        # Only a replayed match names a parent that cannot shadow the new rule.
+        # Without one the finding is unverified, or no Windows rule matched at
+        # all, which rules out every child of rule 60000 too.
+        if verification is None or verification.effective_state not in _MATCHED_STATES or not verification.rule_id:
+            return None
+        rule = eventchannel.suggest_rule(finding.sample_log, parent=verification.rule_id)
         return None if rule is None else ("Suggested Wazuh rule (eventchannel)", rule)
     # Line breaks only: a pattern is matched against one log line, and runs of
     # spaces inside it are literal text the regex must keep.

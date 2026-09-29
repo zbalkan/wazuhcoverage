@@ -7,7 +7,7 @@
 
 It reads `archives.json` and `archives.json.gz` produced when Wazuh JSON archiving is enabled and never modifies them. See the Wazuh documentation for [archiving event logs](https://documentation.wazuh.com/current/user-manual/manager/event-logging.html#archiving-event-logs).
 
-`wazuhcoverage` supports Linux only and requires Python 3.9 or newer. Findings are replayed through the local `wazuh-logtest` socket, so a full report needs a running Wazuh manager that the invoking user can reach. If the socket is absent, unresponsive, or not permitted, the CLI states why replay is unavailable and produces the archive-only analysis instead.
+`wazuhcoverage` supports Linux only and requires Python 3.9 or newer. Findings are replayed through the local `wazuh-logtest` socket, so it needs a running Wazuh manager that the invoking user can reach. If the socket is absent, unresponsive, or not permitted, the CLI states why and exits with status `3` without reading any archive: an archive alone cannot tell an unmatched event from a suppressed one.
 
 ## Installation
 
@@ -23,7 +23,7 @@ For use as a Python library:
 python -m pip install wazuhcoverage
 ```
 
-`wazuhtester` is a runtime dependency because replay is part of the normal coverage workflow. A missing or unreachable manager does not make archive analysis fail; the CLI reports the socket problem and continues with an archive-only report.
+`wazuhtester` is a runtime dependency because every run replays its findings through the manager.
 
 The package installs DuckDB for archive analysis and drain3 for finding grouping. Dependency constraints and their rationale are documented in [design notes](docs/DESIGN.md#dependency-constraints).
 
@@ -83,7 +83,7 @@ The sample is retained for validation and replay rather than reconstructed from 
 
 ## Manager replay
 
-The CLI automatically replays representative findings through the local manager's `wazuh-logtest` socket when it is reachable. This can distinguish several states that the archive alone cannot safely separate, including genuinely uncovered events and events matched by a level-0 rule. If the socket cannot be used, the CLI reports the reason and produces the archive-only report.
+The CLI replays representative findings through the local manager's `wazuh-logtest` socket. This distinguishes states that the archive alone cannot safely separate, including genuinely uncovered events and events matched by a level-0 rule, so replay is required: if the socket cannot be used, the CLI reports the reason and exits with status `3`.
 
 Replay answers for the manager being queried now, not necessarily the manager configuration that originally wrote the archive. It also cannot reproduce every stateful rule from one representative event, and Windows EventChannel findings replay only on a manager whose rule 60000 uses `<decoded_as>json</decoded_as>`, because `wazuh-logtest` cannot run the EventChannel decoder; otherwise they are reported as unverified. See [CAVEATS.md](docs/CAVEATS.md) for the interpretation limits and the Wazuh references behind them.
 

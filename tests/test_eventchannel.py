@@ -89,41 +89,33 @@ def test_non_json_eventchannel_log_and_other_decoders_are_still_mined(tmp_path: 
     assert not any(pattern.startswith("channel=") for pattern in patterns)
 
 
-def test_rule_skeleton_uses_the_channel_group_rule() -> None:
-    rule = suggest_rule(_win_log("4624", 1))
+def test_rule_skeleton_keys_on_event_id_and_provider_under_the_given_parent() -> None:
+    rule = suggest_rule(_win_log("4624", 1), parent="60106")
 
     assert rule is not None
-    assert "<if_sid>60001</if_sid>" in rule
+    assert "<if_sid>60106</if_sid>" in rule
     assert '<field name="win.system.eventID" type="pcre2">^4624$</field>' in rule
     assert '<field name="win.system.providerName" type="pcre2">^Microsoft-Windows-Security-Auditing$</field>' in rule
 
 
-def test_rule_skeleton_for_an_unlisted_channel_uses_the_base_rule_and_escapes() -> None:
-    rule = suggest_rule(_win_log("1", 1, channel="Custom/Operational", provider="A&B (x)"))
+def test_rule_skeleton_escapes_regex_and_xml() -> None:
+    rule = suggest_rule(_win_log("1", 1, channel="Custom/Operational", provider="A&B (x)"), parent="60000")
 
     assert rule is not None
-    assert "<if_sid>60000</if_sid>" in rule
     assert "^A&amp;B \\(x\\)$" in rule
-
-
-def test_powershell_channel_uses_its_own_group_rule() -> None:
-    rule = suggest_rule(_win_log("4104", 1, channel="Microsoft-Windows-PowerShell/Operational", provider="P"))
-
-    assert rule is not None
-    assert "<if_sid>91801</if_sid>" in rule
 
 
 def test_no_rule_skeleton_without_a_provider() -> None:
     # Rule 60000 requires win.system.providerName, so nothing below it can match.
     record = json.dumps({"win": {"system": {"channel": "Security", "eventID": "0"}}})
 
-    assert suggest_rule(record) is None
+    assert suggest_rule(record, parent="60000") is None
 
 
 def test_no_rule_skeleton_without_an_event_id() -> None:
-    assert suggest_rule(_win_log(None, 1)) is None
-    assert suggest_rule("not json") is None
-    assert suggest_rule('{"win":{"system":{"eventID":4624}}}') is None
+    assert suggest_rule(_win_log(None, 1), parent="60000") is None
+    assert suggest_rule("not json", parent="60000") is None
+    assert suggest_rule('{"win":{"system":{"eventID":4624}}}', parent="60000") is None
 
 
 def _eventchannel_finding(sample: str) -> Finding:
@@ -142,25 +134,6 @@ def _eventchannel_finding(sample: str) -> Finding:
         observed_rule_level=None,
         sample_log=sample,
     )
-
-
-def test_reports_suggest_a_rule_not_a_regex_for_eventchannel_findings() -> None:
-    finding = _eventchannel_finding(_win_log("4624", 1))
-
-    rows = _finding_rows(1, finding, None)
-    rendered = _render_finding(finding, None)
-
-    assert any(row.startswith("    Suggested Wazuh rule (eventchannel): <rule ") for row in rows)
-    assert not any("Suggested Wazuh regex" in row for row in rows)
-    assert "<h4>Suggested Wazuh rule (eventchannel)</h4>" in rendered
-    assert "&lt;if_sid&gt;60001&lt;/if_sid&gt;" in rendered
-
-
-def test_reports_offer_no_suggestion_for_an_eventchannel_record_without_a_key() -> None:
-    finding = _eventchannel_finding('{"win":{"system":{"message":"\\"text\\""}}}')
-
-    assert not any("Suggested" in row for row in _finding_rows(1, finding, None))
-    assert "Suggested" not in _render_finding(finding, None)
 
 
 def _verification(state: str, rule_id: Optional[str]) -> Verification:
@@ -188,12 +161,35 @@ def test_a_replayed_match_becomes_the_parent_of_the_suggested_rule() -> None:
     assert "<if_sid>61100</if_sid>" in suggestion
 
 
-def test_without_a_matched_rule_the_channel_group_rule_is_the_parent() -> None:
+def test_reports_suggest_a_rule_not_a_regex_for_eventchannel_findings() -> None:
+    finding = _eventchannel_finding(_win_log("4624", 1))
+    matched = _verification("suppressed", "60106")
+
+    rows = _finding_rows(1, finding, matched)
+    rendered = _render_finding(finding, matched)
+
+    assert any(row.startswith("    Suggested Wazuh rule (eventchannel): <rule ") for row in rows)
+    assert not any("Suggested Wazuh regex" in row for row in rows)
+    assert "<h4>Suggested Wazuh rule (eventchannel)</h4>" in rendered
+    assert "&lt;if_sid&gt;60106&lt;/if_sid&gt;" in rendered
+
+
+def test_no_suggestion_without_a_replayed_match() -> None:
+    # Unverified leaves the parent unknown; uncovered means rule 60000 itself did
+    # not match, so no child of it could.
     finding = _eventchannel_finding(_win_log("4624", 1))
 
     for verification in (None, _verification("unverified", None), _verification("uncovered", None)):
-        suggestion = next(row for row in _finding_rows(1, finding, verification) if "Suggested Wazuh rule" in row)
-        assert "<if_sid>60001</if_sid>" in suggestion
+        assert not any("Suggested" in row for row in _finding_rows(1, finding, verification))
+        assert "Suggested" not in _render_finding(finding, verification)
+
+
+def test_no_suggestion_for_an_eventchannel_record_without_a_key() -> None:
+    finding = _eventchannel_finding('{"win":{"system":{"message":"\\"text\\""}}}')
+    matched = _verification("suppressed", "60000")
+
+    assert not any("Suggested" in row for row in _finding_rows(1, finding, matched))
+    assert "Suggested" not in _render_finding(finding, matched)
 
 
 def test_no_suggestion_when_replay_shows_the_finding_already_alerts() -> None:

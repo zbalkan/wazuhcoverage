@@ -63,7 +63,6 @@ def test_json_output_contains_metric_counts_denominators_and_fractional_rates(
     archive.touch()
 
     monkeypatch.setattr(cli, "resolve_targets", lambda _targets: [archive])
-    monkeypatch.setattr(cli, "unavailable_reason", lambda: "no manager")
     monkeypatch.setattr(cli, "read_alert_threshold", lambda: 3)
     monkeypatch.setattr(cli, "analyze_archive", lambda path, **_kwargs: _analysis(Path(path)))
 
@@ -101,7 +100,6 @@ def test_multiple_archives_use_one_json_object_per_line(
         archive.touch()
 
     monkeypatch.setattr(cli, "resolve_targets", lambda _targets: archives)
-    monkeypatch.setattr(cli, "unavailable_reason", lambda: "no manager")
     monkeypatch.setattr(cli, "read_alert_threshold", lambda: 3)
     monkeypatch.setattr(cli, "analyze_archive", lambda path, **_kwargs: _analysis(Path(path)))
 
@@ -171,7 +169,6 @@ def test_html_output_writes_report_file(
     archive.touch()
 
     monkeypatch.setattr(cli, "resolve_targets", lambda _targets: [archive])
-    monkeypatch.setattr(cli, "unavailable_reason", lambda: "no manager")
     monkeypatch.setattr(cli, "read_alert_threshold", lambda: 3)
     monkeypatch.setattr(cli, "analyze_archive", lambda path, **_kwargs: _analysis(Path(path)))
 
