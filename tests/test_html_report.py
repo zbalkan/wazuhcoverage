@@ -84,7 +84,7 @@ def test_html_report_embeds_template_css_js_and_uses_pinned_cdns() -> None:
     assert 'data-tab="findings"' in rendered
     assert "Effective outcomes" in rendered
     assert "Metrics by log type" in rendered
-    assert "Dropped" in rendered
+    assert "No decoder" in rendered
 
 
 def test_html_report_escapes_finding_content_and_keeps_it_out_of_chart_json() -> None:
@@ -114,11 +114,17 @@ def _report_data(rendered: str) -> Dict:  # noqa: UP006
 
 def test_findings_without_a_verdict_keep_their_observed_outcome() -> None:
     # There is one layout: replay verdicts where they exist, archive
-    # observations for the rest, with rule-less events left Unresolved.
+    # observations for the rest, with rule-less events left not verified.
     rendered = render_html_report(_analysis())
     data = _report_data(rendered)
 
-    assert data["outcome_names"] == ["Processed", "Suppressed", "Dropped", "Unresolved"]
+    assert data["outcome_names"] == [
+        "Rule matched, alerted",
+        "Rule matched, no alert",
+        "No rule",
+        "No decoder",
+        "Not verified",
+    ]
     assert "Archive ambiguity" not in rendered
     assert "Without complete replay" in rendered
 

@@ -72,7 +72,7 @@ Reports and sample rows go to stdout. Progress, warnings, and the final `Matched
 
 One archive failing does not stop the remaining targets.
 
-With `--json`, stdout contains one JSON object per archive. A multi-target run therefore uses JSON Lines rather than one enclosing array. Each object includes the archive label, alert threshold and source, the five primary metrics, and complete per-log-type rates and contributions. Metric rates are fractions between `0` and `1`; unavailable replay-dependent metrics contain null values and `"available": false`.\n\nWith `--html FILE`, exactly one archive must be selected. The CLI writes the report to `FILE`, leaves stdout empty, and refuses an output path that refers to the input archive, including through a symbolic or hard link. The generated HTML contains the report structure, CSS, and application JavaScript; pinned Pico CSS and ECharts resources are loaded from jsDelivr. The Dashboard uses the same Processed/Suppressed/Dropped/Unresolved outcomes as the text report. Tables remain available when charts cannot be rendered, and finding samples are HTML-escaped before they are written.
+With `--json`, stdout contains one JSON object per archive. A multi-target run therefore uses JSON Lines rather than one enclosing array. Each object includes the archive label, alert threshold and source, the five primary metrics, and complete per-log-type rates and contributions. Metric rates are fractions between `0` and `1`; unavailable replay-dependent metrics contain null values and `"available": false`.\n\nWith `--html FILE`, exactly one archive must be selected. The CLI writes the report to `FILE`, leaves stdout empty, and refuses an output path that refers to the input archive, including through a symbolic or hard link. The generated HTML contains the report structure, CSS, and application JavaScript; pinned Pico CSS and ECharts resources are loaded from jsDelivr. The Dashboard uses the same outcomes as the text report. Tables remain available when charts cannot be rendered, and finding samples are HTML-escaped before they are written.
 
 
 | Exit code | Meaning |
@@ -101,14 +101,15 @@ The skipped count appears in the report and a warning is written to stderr. Use 
 
 ## Coverage report
 
-Every parsed event is assigned to exactly one observed bucket:
+Every parsed event is assigned to exactly one outcome, from its archive status or, for a replayed finding, its replay verdict:
 
-| Outcome | Bucket | Meaning |
+| Outcome | Status | Meaning |
 | --- | --- | --- |
-| Processed | `at_or_above_threshold` | A rule fired at or above the configured alert threshold. |
-| Dropped | `no_decoder` | No decoder was recorded for the event. |
-| Dropped | `no_alerting_rule` | The event decoded, but the archive records no alerting rule. |
-| Dropped | `below_threshold` | A rule fired below the alert threshold. |
+| Rule matched, alerted | `at_or_above_threshold` | A rule fired at or above the configured alert threshold. |
+| Rule matched, no alert | `suppressed`, `below_threshold` | A rule matched at level 0, or below the alert threshold. The outcome table breaks these out as `level 0` and `below threshold`. |
+| No rule | `uncovered` | The event decoded, and the replay matched no rule. |
+| No decoder | `no_decoder` | No decoder parsed the event. |
+| Not verified | `no_alerting_rule`, `unverified` | The archive records no rule and the replay gave no usable verdict. |
 
 The CLI reads `<alerts><log_alert_level>` from `/var/ossec/etc/ossec.conf` when that local configuration is readable. If it is absent or cannot be read, the CLI assumes Wazuh's documented default of `3`. The resolved value and its provenance are printed near the top of every statistics report, for example `Alert threshold: 6 (from /var/ossec/etc/ossec.conf)` or `Alert threshold: 3 (Wazuh default assumed; could not read /var/ossec/etc/ossec.conf)`. The same resolved value is used for both archive classification and manager replay. Library callers choose the threshold explicitly; see [API.md](API.md).
 
@@ -139,9 +140,9 @@ The replay provides an effective state for the representative sample:
 
 A replay failure is `unverified`, never `uncovered`.
 
-For a replayed finding, the CLI displays this effective state as its status and uses the replayed decoder, rule ID, and level. It does not repeat the archive's `no_alerting_rule` status or blank rule fields beside a confirmed match. The outcome and log-type tables cover the whole archive: they replace each replayed finding's observed status with the sample's effective verdict and use its replay decoder as the log type when available. The other events retain their archive observations. Processed means an alerting rule met the threshold; Suppressed means a rule matched at level 0 or below the threshold; Dropped means no decoder or matching rule; Unresolved covers unreplayed rule-less events and replay failures. The separate effective-coverage table reports the replayed findings alone. Counts attributed to replay verdicts are the sizes of their represented findings; only one sample from each finding was replayed.
+For a replayed finding, the CLI displays this effective state as its status and uses the replayed decoder, rule ID, and level. It does not repeat the archive's `no_alerting_rule` status or blank rule fields beside a confirmed match. The outcome and log-type tables cover the whole archive: they replace each replayed finding's observed status with the sample's effective verdict and use its replay decoder as the log type when available. The other events retain their archive observations. The outcomes are those in the table above. The separate effective-coverage table reports the replayed findings alone. Counts attributed to replay verdicts are the sizes of their represented findings; only one sample from each finding was replayed.
 
-Findings appear under Dropped, Processed, and, when needed, Unresolved headings. A suppressed or below-threshold finding belongs to Processed because a rule matched, even though it did not produce an alert. Each heading sorts findings by event count, largest first, and numbers them within that heading. The outcome table keeps Suppressed separate so its count is visible.
+Findings appear under their outcome, gaps first: No rule, No decoder, Rule matched, no alert, Rule matched, alerted, then Not verified. Headings without findings are omitted. Each heading sorts findings by event count, largest first, and numbers them within that heading.
 
 Replay describes the manager used for the replay, which may not have the same ruleset as the manager that originally wrote the archive. A single-sample replay also cannot reproduce rules that require event history, and the archive does not preserve the original `log_format`, which wazuh-logtest in Wazuh 4.14 does not use to choose decoders anyway. These limitations are explained in [CAVEATS.md](CAVEATS.md).
 

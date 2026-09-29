@@ -52,14 +52,15 @@ For machine-readable metrics, use `wazuhcoverage --json archive.json.gz`. Multip
 
 ## Coverage model
 
-Every parsed event lands in exactly one observed bucket:
+Every parsed event lands in exactly one outcome. The archive records one of four statuses; replaying a rule-less event through the manager resolves it into one of the others:
 
-| Outcome | Bucket | Meaning | Typical action |
+| Outcome | Status | Meaning | Typical action |
 | --- | --- | --- | --- |
-| Processed | `at_or_above_threshold` | A rule fired at or above the alert threshold. | Covered. |
-| Dropped | `no_decoder` | No decoder was recorded for the event. | Check collection format or decoder coverage. |
-| Dropped | `no_alerting_rule` | The event decoded, but the archive records no alerting rule. | Replay the sample before treating it as a gap. |
-| Dropped | `below_threshold` | A rule fired below the alert threshold. | Review whether the level is intentional. |
+| Rule matched, alerted | `at_or_above_threshold` | A rule fired at or above the alert threshold. | Covered. |
+| Rule matched, no alert | `suppressed`, `below_threshold` | A rule matched at level 0, or below the alert threshold. | Review whether the level is intentional. |
+| No rule | `uncovered` | The event decoded, and the replay matched no rule. | Write a rule. |
+| No decoder | `no_decoder` | No decoder parsed the event. | Check collection format or decoder coverage. |
+| Not verified | `no_alerting_rule`, `unverified` | The archive records no rule and the replay gave no usable verdict. | Read the replay error. |
 
 The CLI reads `<alerts><log_alert_level>` from `/var/ossec/etc/ossec.conf` when the local manager configuration is available. Otherwise it assumes Wazuh's default threshold of `3`. The report shows both the threshold and its source before the statistics. The Python API keeps the threshold explicit for callers analysing archives elsewhere.
 

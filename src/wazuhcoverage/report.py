@@ -8,32 +8,31 @@ from typing import Dict, List, Tuple  # noqa: UP035
 from wazuhcoverage.metrics import MetricSnapshot, MetricValue, calculate_metrics, resolve_effective_counts
 from wazuhcoverage.models import (
     EFFECTIVE_STATES,
-    PROCESSED_STATUS,
     ArchiveAnalysis,
     Finding,
     Verification,
 )
 from wazuhcoverage.presentation import (
     FINDING_GROUPS,
+    NO_ALERT,
+    OUTCOME_STATUSES,
     RESOLVED_OUTCOMES,
+    SHORT_LABELS,
+    STATUS_LABELS,
     finding_group,
     outcome_counts,
     present_finding,
 )
 from wazuhcoverage.wazuh_regex import suggest_for_finding
 
-_PROCESSED_LABEL = "Processed"
-# The processed row names its bucket inline. The dropped rows name theirs by
-# being the bucket, so this is the only row that would otherwise leave a reader
-# unable to map the report back to the observed_status values the API returns.
-_PROCESSED_OUTCOME = f"{_PROCESSED_LABEL} ({PROCESSED_STATUS})"
-_OUTCOME_WIDTH = max(24, len(_PROCESSED_OUTCOME) + 2)
+_OUTCOME_WIDTH = max(24, max(len(outcome) for outcome in RESOLVED_OUTCOMES) + 2)
 _LOG_TYPE_WIDTH = 32
 _COUNT_WIDTH = 14
 _PERCENT_WIDTH = 10
-_DROPPED_PERCENT_WIDTH = 12
 _EFFECTIVE_WIDTH = max(24, max(len(state) for state in EFFECTIVE_STATES) + 2)
-_RESOLVED_LOG_WIDTHS: Dict[str, int] = {column: max(12, len(column) + 2) for column in RESOLVED_OUTCOMES}  # noqa: UP006
+_RESOLVED_LOG_WIDTHS: Dict[str, int] = {  # noqa: UP006
+    column: max(12, len(SHORT_LABELS[column]) + 2) for column in RESOLVED_OUTCOMES
+}
 
 
 def render_report(
@@ -46,9 +45,10 @@ def render_report(
     """Render a compact human-readable report for one archive.
 
     The full-archive tables use replay verdicts for the findings they cover and
-    archive observations for the remainder. A matched rule below
-    the alert threshold is Suppressed, while a confirmed unmatched or undecoded
-    event is Dropped. Ambiguous or failed replays remain Unresolved.
+    archive observations for the remainder. A rule that matched at level 0 or
+    below the alert threshold is "Rule matched, no alert"; a decoded event no
+    rule matched is "No rule"; an event no decoder parsed is "No decoder"; a
+    rule-less record without a usable verdict is "Not verified".
     """
 
     lines: List[str] = [f"Archive: {analysis.path}"]  # noqa: UP006
@@ -124,34 +124,29 @@ def _finding_rows(index: int, finding: Finding, verification: Verification | Non
 
 
 def _resolved_outcome_table(statuses: Dict[str, int], total: int) -> List[str]:  # noqa: UP006
-    """Keep whole-archive totals while separating matched suppression from loss."""
+    """Say what happened to every archived event, with no-alert matches broken out.
+
+    A no-alert match is broken down into level-0 and below-threshold matches,
+    because the fix differs: raising a level versus lowering the threshold.
+    """
 
     outcomes = outcome_counts(statuses)
     rows = [
         "",
         "Outcome",
         "-------",
-        _outcome_row("Outcome", "Events", "% total", "% dropped"),
+        _outcome_row("Outcome", "Events", "% total"),
     ]
     for outcome, count in outcomes.items():
-        rows.append(
-            _outcome_row(
-                outcome,
-                f"{count:,}",
-                _percent(_percentage(count, total)),
-                _percent(100.0) if outcome == "Dropped" and count else "-",
-            )
-        )
-        if outcome in ("Suppressed", "Dropped"):
-            states = ("suppressed", "below_threshold") if outcome == "Suppressed" else ("no_decoder", "uncovered")
+        rows.append(_outcome_row(outcome, f"{count:,}", _percent(_percentage(count, total))))
+        if outcome == NO_ALERT:
             rows.extend(
                 _outcome_row(
-                    f"  {state}",
+                    f"  {STATUS_LABELS[state]}",
                     f"{statuses.get(state, 0):,}",
                     _percent(_percentage(statuses.get(state, 0), total)),
-                    _percent(_percentage(statuses.get(state, 0), count)) if outcome == "Dropped" and count else "-",
                 )
-                for state in states
+                for state in OUTCOME_STATUSES[NO_ALERT]
             )
     return rows
 
@@ -163,7 +158,9 @@ def _resolved_log_type_table(log_types: Dict[str | None, Dict[str, int]], total:
         "",
         "Log types",
         "---------",
-        _resolved_log_type_row("Log type", "Events", "% total", {name: name for name in RESOLVED_OUTCOMES}),
+        _resolved_log_type_row(
+            "Log type", "Events", "% total", {name: SHORT_LABELS[name] for name in RESOLVED_OUTCOMES}
+        ),
     ]
     for log_type, statuses in sorted(log_types.items(), key=lambda item: (-sum(item[1].values()), item[0] or "")):
         counts = outcome_counts(statuses)
@@ -203,7 +200,7 @@ def _metrics_table(snapshot: MetricSnapshot) -> List[str]:  # noqa: UP006
         _metric_value_row("Decoder failure", snapshot.decoder_failure_rate),
         _metric_value_row("Uncovered", snapshot.uncovered_rate),
         _metric_value_row("Below threshold", snapshot.below_threshold_rate),
-        _metric_value_row("Unresolved", snapshot.uncertainty_rate),
+        _metric_value_row("Not verified", snapshot.uncertainty_rate),
     ]
     return rows
 
@@ -327,12 +324,11 @@ def _effective_row(state: str, findings: str, events: str, percentage: str) -> s
     return "".join(cells).rstrip()
 
 
-def _outcome_row(outcome: str, count: str, percentage: str, dropped_share: str) -> str:
+def _outcome_row(outcome: str, count: str, percentage: str) -> str:
     cells = [
         f"{outcome:<{_OUTCOME_WIDTH}}",
         f"{count:>{_COUNT_WIDTH}}",
         f"{percentage:>{_PERCENT_WIDTH}}",
-        f"{dropped_share:>{_DROPPED_PERCENT_WIDTH}}",
     ]
     return "".join(cells).rstrip()
 

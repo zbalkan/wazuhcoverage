@@ -64,7 +64,7 @@ def test_report_shows_primary_metrics_and_unavailable_uncovered_state() -> None:
     assert "Malformed input" in text and "2 / 12" in text and "16.67%" in text
     assert "Decoder failure" in text and "3 / 10" in text and "30.00%" in text
     assert "Below threshold" in text and "1 / 10" in text and "10.00%" in text
-    assert "Unresolved" in text and "3 / 10" in text and "30.00%" in text
+    assert "Not verified" in text and "3 / 10" in text and "30.00%" in text
     assert "Uncovered" in text and "unavailable without complete replay" in text
 
 
@@ -74,7 +74,7 @@ def test_replayed_report_shows_rates_and_largest_contributors() -> None:
     metrics = text.split("\nMetrics\n-------\n", 1)[1].split("\nLargest metric contributors\n", 1)[0]
     assert "Uncovered" in metrics and "2 / 7" in metrics and "28.57%" in metrics
     assert "Below threshold" in metrics and "2 / 10" in metrics and "20.00%" in metrics
-    assert "Unresolved" in metrics and "0 / 10" in metrics and "0.00%" in metrics
+    assert "Not verified" in metrics and "0 / 10" in metrics and "0.00%" in metrics
 
     contributors = text.split("\nLargest metric contributors\n", 1)[1]
     assert "app: 3 events | local 100.00% | contribution 100.00%" in contributors
