@@ -361,7 +361,9 @@ def _create_events(connection: DuckDBPyConnection, archive: Path, *, skip_malfor
                     '$.decoder.parent',
                     '$.rule.id',
                     '$.rule.level',
-                    '$.rule.description'
+                    '$.rule.description',
+                    '$.predecoder.timestamp',
+                    '$.predecoder.hostname'
                 ]
             ) AS fields
             FROM read_ndjson_objects({archive_sql}, ignore_errors = {ignore_errors})
@@ -378,7 +380,9 @@ def _create_events(connection: DuckDBPyConnection, archive: Path, *, skip_malfor
             fields[8] AS decoder_parent,
             fields[9] AS rule_id,
             try_cast(fields[10] AS INTEGER) AS rule_level,
-            fields[11] AS rule_description
+            fields[11] AS rule_description,
+            fields[12] AS predecoded_timestamp,
+            fields[13] AS predecoded_hostname
         FROM extracted
         """
     )
@@ -463,8 +467,8 @@ def _create_template_map(connection: DuckDBPyConnection, miner: TemplateMiner) -
         CREATE TEMP TABLE event_logs AS
         SELECT
             event_id,
-            md5_number_upper(preprocess_log(full_log)) AS log_hi,
-            md5_number_lower(preprocess_log(full_log)) AS log_lo,
+            md5_number_upper(preprocess_log(full_log, predecoded_timestamp, predecoded_hostname)) AS log_hi,
+            md5_number_lower(preprocess_log(full_log, predecoded_timestamp, predecoded_hostname)) AS log_lo,
             strlen(full_log) AS log_length
         FROM classified_events
         WHERE observed_status IN ('no_decoder', 'no_alerting_rule')
@@ -596,7 +600,7 @@ def _read_chunk(connection: DuckDBPyConnection, first_event: int, last_event: in
         """
         SELECT normalized_log, md5_number_upper(normalized_log), md5_number_lower(normalized_log)
         FROM (
-            SELECT preprocess_log(full_log) AS normalized_log
+            SELECT preprocess_log(full_log, predecoded_timestamp, predecoded_hostname) AS normalized_log
             FROM classified_events
             WHERE event_id BETWEEN $first AND $last
               AND event_id IN (SELECT event_id FROM first_logs WHERE event_id BETWEEN $first AND $last)
@@ -787,7 +791,9 @@ def _create_finding_views(connection: DuckDBPyConnection) -> None:
                     'location': finding_location,
                     'decoder': finding_decoder,
                     'rule_id': rule_id,
-                    'rule_level': rule_level
+                    'rule_level': rule_level,
+                    'predecoded_timestamp': predecoded_timestamp,
+                    'predecoded_hostname': predecoded_hostname
                 }
             ) AS sample
         FROM finding_events
@@ -838,7 +844,10 @@ def _create_finding_views(connection: DuckDBPyConnection) -> None:
                 CASE
                     WHEN g.observed_status = 'below_threshold' THEN concat('rule:', g.rule_key)
                     WHEN g.eventchannel_pattern IS NOT NULL THEN g.eventchannel_pattern
-                    ELSE coalesce(t.log_template, preprocess_log(g.sample.full_log))
+                    ELSE coalesce(
+                        t.log_template,
+                        preprocess_log(g.sample.full_log, g.sample.predecoded_timestamp, g.sample.predecoded_hostname)
+                    )
                 END AS message_pattern
             FROM finding_groups g
             LEFT JOIN templates t ON t.template_id = g.template_id

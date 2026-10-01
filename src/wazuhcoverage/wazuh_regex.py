@@ -6,7 +6,6 @@ import re
 from typing import TYPE_CHECKING, Optional, Tuple  # noqa: UP035
 
 from wazuhcoverage import eventchannel
-from wazuhcoverage.preprocessing import WAZUH_TIMESTAMP_PCRE2
 
 if TYPE_CHECKING:
     from wazuhcoverage.models import Finding, Verification
@@ -17,10 +16,10 @@ if TYPE_CHECKING:
 # hangs off the same channel group rule.
 _MATCHED_STATES = frozenset({"suppressed", "below_threshold"})
 
-_PLACEHOLDER_RE = re.compile(r"(<\*>|<TIMESTAMP>|<UUID>|<HEX>|<NUM>)")
+_PLACEHOLDER_RE = re.compile(r"(<\*>|<UUID>|<HEX>|<NUM>)")
 _OSREGEX_UNREPRESENTABLE = frozenset("^*+")
 _OSREGEX_ESCAPES = frozenset("$()\\|<")
-_PCRE2_ONLY_PLACEHOLDERS = frozenset({"<TIMESTAMP>", "<UUID>", "<HEX>", "<NUM>"})
+_PCRE2_ONLY_PLACEHOLDERS = frozenset({"<UUID>", "<HEX>", "<NUM>"})
 
 _OSREGEX_PLACEHOLDERS = {
     "<*>": r"\S+",
@@ -34,7 +33,6 @@ _PCRE2_PLACEHOLDERS = {
         r"[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}"
     ),
     "<HEX>": r"(?:0x)?[0-9A-Fa-f]{16,}",
-    "<TIMESTAMP>": WAZUH_TIMESTAMP_PCRE2,
 }
 _PCRE2_SPECIALS = frozenset(r"\.^$|?*+()[]{}")
 
@@ -80,7 +78,7 @@ def suggest_wazuh_regex(message_pattern: str) -> Tuple[str, str]:  # noqa: UP006
     Literal text is preserved. OSRegex is used for ordinary Drain wildcards.
     Typed values created by preprocessing use PCRE2 so the suggestion preserves
     the syntax the preprocessor actually recognized instead of broadening UUIDs,
-    long numbers, hexadecimal values or timestamps to generic word tokens.
+    long numbers or hexadecimal values to generic word tokens.
     """
 
     parts = _PLACEHOLDER_RE.split(message_pattern)

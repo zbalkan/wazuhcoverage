@@ -1,7 +1,3 @@
-import re
-
-import pytest
-
 from wazuhcoverage.html_report import _render_finding
 from wazuhcoverage.models import Finding
 from wazuhcoverage.report import _finding_rows
@@ -54,27 +50,6 @@ def test_typed_preprocessor_placeholders_keep_their_known_shape() -> None:
     assert r"[0-9]{5,}" in regex
     assert r"[0-9A-Fa-f]{8}-" in regex
     assert r"(?:0x)?[0-9A-Fa-f]{16,}" in regex
-
-
-def test_timestamp_placeholder_covers_supported_prefix_families() -> None:
-    regex_type, regex = suggest_wazuh_regex("<TIMESTAMP> daemon <*>")
-
-    assert regex_type == "pcre2"
-    assert "Jan|Feb|Mar" in regex
-    assert "Mon|Tue|Wed" in regex
-    assert r"[0-9]{8}T[0-9]{6}" in regex
-    assert r"/[0-9]{4}:" in regex
-    assert regex.endswith(r" daemon \S+$")
-
-
-@pytest.mark.parametrize(
-    "timestamp",
-    ["2026-09-26 13:58:42+03:00", "2026-09-26 13:58:42Z", "Sep 26  13:58:42", "Sep\t6 13:58:42"],
-)
-def test_timestamp_placeholder_matches_the_whole_preprocessed_prefix(timestamp: str) -> None:
-    _, regex = suggest_wazuh_regex("<TIMESTAMP> daemon <*>")
-
-    assert re.fullmatch(regex, f"{timestamp} daemon action")
 
 
 def test_text_finding_shows_the_candidate_beside_the_mined_pattern() -> None:

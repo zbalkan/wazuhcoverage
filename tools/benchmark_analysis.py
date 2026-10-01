@@ -45,6 +45,12 @@ def _realistic_rows(event_count: int) -> Iterator[Dict]:  # noqa: UP006
                 f"10.{variant // 65536 % 256}.{variant // 256 % 256}.{variant % 256} "
                 f"port {1024 + variant % 64000} ssh2"
             ),
+            # What Wazuh's pre-decoder records for that header, as archived.
+            "predecoder": {
+                "program_name": "sshd",
+                "timestamp": "Sep 23 12:00:00",
+                "hostname": f"host-{variant % 997:03d}",
+            },
             "decoder": {},
         }
 

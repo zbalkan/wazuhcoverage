@@ -16,6 +16,12 @@ reports two failure modes per configuration:
     mining exists to remove, so a configuration that avoids merges by
     shattering families has not solved anything.
 
+Each event carries the syslog header an archive record keeps in ``full_log``
+-- a timestamp and the sending host -- together with the values Wazuh's
+pre-decoder records for it, and the header is removed by those values exactly
+as the analyzer does. A corpus without headers hides the failure that matters
+most: the host token splits every family by host.
+
 Run it after changing the normalizer, the corpus, or the drain3 version:
 
     python tools/tune_drain.py
@@ -99,34 +105,52 @@ FAMILIES: Dict[str, Callable[[], str]] = {  # noqa: UP006
     ),
 }
 
-# Kept in step with the normalize_log macro in wazuhcoverage.analysis.
-_SYSLOG_TS = re.compile(r"^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+[0-9]{1,2}\s+[0-9]{2}:[0-9]{2}:[0-9]{2}")
-_ISO_TS = re.compile(
-    r"^[0-9]{4}-[0-9]{2}-[0-9]{2}[T ][0-9]{2}:[0-9]{2}:[0-9]{2}([.,][0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})?"
-)
+_MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+
+# Kept in step with the preprocess_log macro in wazuhcoverage.preprocessing.
 _UUID = re.compile(r"[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}")
 _HEX = re.compile(r"\b(0x)?[0-9A-Fa-f]{16,}\b")
 _NUM = re.compile(r"\b[0-9]{5,}\b")
 
 
-def normalize(text: str) -> str:
-    text = _SYSLOG_TS.sub("<TIMESTAMP>", text)
-    text = _ISO_TS.sub("<TIMESTAMP>", text)
+def _drop_header_field(text: str, field: str | None) -> str:
+    if field and text.startswith(field) and (len(text) == len(field) or text[len(field)] in " \t"):
+        return text[len(field) :].lstrip(" \t")
+    return text
+
+
+def normalize(text: str, header_time: str | None = None, header_host: str | None = None) -> str:
+    text = _drop_header_field(_drop_header_field(text, header_time), header_host)
     text = _UUID.sub("<UUID>", text)
     text = _HEX.sub("<HEX>", text)
     text = _NUM.sub("<NUM>", text)
     return text.strip()
 
 
-def build_corpus(events_per_family: int = 400, seed: int = 11) -> List[Tuple[str, str]]:  # noqa: UP006
-    """Return (family, full_log) pairs."""
+def _header() -> Tuple[str, str]:  # noqa: UP006
+    """Return a syslog timestamp and host, as the pre-decoder records them."""
+
+    timestamp = (
+        f"{random.choice(_MONTHS)} {random.randint(1, 28):>2} "
+        f"{random.randint(0, 23):02d}:{random.randint(0, 59):02d}:{random.randint(0, 59):02d}"
+    )
+    return timestamp, random.choice(HOSTS)
+
+
+def build_corpus(events_per_family: int = 400, seed: int = 11) -> List[Tuple[str, str, str, str]]:  # noqa: UP006
+    """Return (family, full_log, predecoded timestamp, predecoded hostname) tuples."""
 
     random.seed(seed)
-    return [(name, make()) for name, make in FAMILIES.items() for _ in range(events_per_family)]
+    rows = []
+    for name, make in FAMILIES.items():
+        for _ in range(events_per_family):
+            timestamp, host = _header()
+            rows.append((name, f"{timestamp} {host} {make()}", timestamp, host))
+    return rows
 
 
 def evaluate(
-    rows: List[Tuple[str, str]],  # noqa: UP006
+    rows: List[Tuple[str, str, str, str]],  # noqa: UP006
     *,
     sim_th: float,
     depth: int,
@@ -143,8 +167,8 @@ def evaluate(
     miner = TemplateMiner(config=config)
 
     events: Counter = Counter()
-    for family, log in rows:
-        events[(family, normalize(log))] += 1
+    for family, log, header_time, header_host in rows:
+        events[(family, normalize(log, header_time, header_host))] += 1
 
     assigned = {message: miner.add_log_message(message)["cluster_id"] for message in sorted({m for _, m in events})}
     mined = {cluster.cluster_id: cluster.get_template() for cluster in miner.drain.clusters}  # type: ignore

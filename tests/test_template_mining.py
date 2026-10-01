@@ -304,13 +304,21 @@ def test_cluster_eviction_keeps_prior_assignments(tmp_path: Path, monkeypatch) -
     assert sum(finding.event_count for finding in result.findings) == len(rows)
 
 
-def test_timestamp_preprocessing_prevents_drain_fragmentation(tmp_path: Path) -> None:
+def test_the_predecoded_syslog_header_does_not_fragment_a_family(tmp_path: Path) -> None:
+    # Months and hosts differ on every line. Left in, the header splits one
+    # family by month (the first token routes Drain's tree) and by host.
     archive = tmp_path / "archives.json"
     rows = [
-        _undecoded("Sep 26 13:58:42 daemon failed for alice", "001"),
-        _undecoded("Oct  1 13:59:42 daemon failed for bob", "002"),
-        _undecoded("2026-09-26T14:00:42Z daemon failed for carol", "003"),
-        _undecoded("Sat Sep 26 14:01:42 2026 daemon failed for dave", "004"),
+        {
+            **_undecoded(f"{when} {host} daemon[7]: failed for {user}", agent),
+            "predecoder": {"timestamp": when, "hostname": host},
+        }
+        for when, host, user, agent in (
+            ("Sep 26 13:58:42", "web-01", "alice", "001"),
+            ("Oct  1 13:59:42", "db-02", "bob", "002"),
+            ("Nov 30 14:00:42", "mail-03", "carol", "003"),
+            ("Dec  9 14:01:42", "fs-04", "dave", "004"),
+        )
     ]
     _write_jsonl(archive, rows)
 
@@ -319,5 +327,5 @@ def test_timestamp_preprocessing_prevents_drain_fragmentation(tmp_path: Path) ->
     assert len(result.findings) == 1
     finding = result.findings[0]
     assert finding.event_count == len(rows)
-    assert finding.message_pattern == "<TIMESTAMP> daemon failed for <*>"
+    assert finding.message_pattern == "daemon[7]: failed for <*>"
     assert finding.sample_log in {row["full_log"] for row in rows}

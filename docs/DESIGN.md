@@ -52,7 +52,7 @@ The archive's own `Rule` and `Level` stay in the report beside the `Effective` l
 
 ## Template mining
 
-Findings for `no_decoder` and `no_alerting_rule` group by a template mined with [drain3](https://github.com/IBM/Drain3). Masking alone is not enough: on the labelled corpus in `tools/tune_drain.py`, 6,400 events across sixteen log families reduce to 5,352 distinct masked messages, and mining turns those into 25 templates. A report with one finding per event is not a report.
+Findings for `no_decoder` and `no_alerting_rule` group by a template mined with [drain3](https://github.com/IBM/Drain3). Masking alone is not enough: on the labelled corpus in `tools/tune_drain.py`, 6,400 events across sixteen log families, each with a realistic syslog header, reduce to about 5,350 distinct messages (5,348 to 5,365 across seeds) once the header is removed and identifiers are masked, and mining turns those into 25 templates. A report with one finding per event is not a report.
 
 Mining is the grouping engine for text logs and there is no flag to disable it, so two analyses of the same archive are always comparable.
 
@@ -81,7 +81,7 @@ drain3 is configured explicitly rather than from a `drain3.ini`, because the lib
 
 ### Cost and the cluster cap
 
-DuckDB deduplicates messages before mining, so repeated events are cheap, but stock Drain's cost depends on both the archive's vocabulary and the number of candidate clusters in a prefix-tree leaf. With the current syslog normalization and tree depth, the leading `<TIMESTAMP>` token provides no useful routing; unique-heavy input therefore made stock Drain approach a pairwise scan. It took 103 seconds for 60,000 structure-free messages and 1,373 seconds for 120,000 while peaking at 127 MB.
+DuckDB deduplicates messages before mining, so repeated events are cheap, but stock Drain's cost depends on both the archive's vocabulary and the number of candidate clusters in a prefix-tree leaf. When the leading tokens carry no structure, as with structure-free messages, the tree provides no useful routing and unique-heavy input made stock Drain approach a pairwise scan. It took 103 seconds for 60,000 structure-free messages and 1,373 seconds for 120,000 while peaking at 127 MB.
 
 The analyzer adds a positional inverted index over each cluster's non-wildcard template tokens. A length-*n* template needs at least *k* = `ceil(sim_th × n)` exact positional matches, so every valid candidate must occur in the posting list of at least one of any *n − k + 1* message positions. Probing the rarest of those positions discards unrelated clusters before the exact Drain distance calculation. Monotonically increasing cluster IDs preserve the original leaf order without scanning the leaf to filter the candidate set, retaining Drain's match and tie semantics. Template widening and LRU eviction update the index, and differential tests compare every assignment with stock Drain.
 
@@ -111,7 +111,11 @@ The distinction between skipping and ignoring is the whole point: ignoring would
 
 ### Normalization
 
-The regex pass ahead of mining is deliberately conservative: common timestamp prefixes, UUIDs, hexadecimal tokens of sixteen characters or more, and decimal numbers of five digits or more. Short numbers, IP addresses, ports, usernames, paths, event IDs, and status codes are retained, because masking them can materially change detection semantics and a pattern that hides an event ID is not worth reading.
+Two steps run ahead of mining, and neither changes Drain itself.
+
+The syslog header is removed first, by value. An archive record keeps the whole original line in `full_log`, header included, and also records what Wazuh's pre-decoder parsed from it: `predecoder.timestamp` and, when it found one, `predecoder.hostname`. Exactly those leading tokens are removed, and nothing is guessed: a record without a pre-decoded header is mined as it is, and an ISO-prefixed line for which Wazuh recorded no hostname keeps its host token. The header has to go because it differs on nearly every event. Masking the timestamp alone is not enough: on the labelled corpus with realistic headers, the host token still split every family into one template per host at every threshold that kept families apart (147 templates, 41 of them mixing families, at 0.56), and at lower thresholds families merged instead. With the header removed by value, the same corpus mines into the 25 templates and zero mixed ones of the header-free corpus at 0.56 and 0.57 on every seed, so the parameters above stand. Wazuh misparses a header without a hostname as `hostname: "kernel:"`; removing that recorded value too keeps such lines consistent with each other.
+
+The regex masks then remove the identifiers that still vary within a family: UUIDs, hexadecimal tokens of sixteen characters or more, and decimal numbers of five digits or more. Without them a family with a per-event identifier fragments into one template per event. Short numbers, IP addresses, ports, usernames, paths, event IDs, and status codes are retained, because masking them can materially change detection semantics and a pattern that hides an event ID is not worth reading. Drain3's own masking instructions are not used: masks applied in SQL run before messages are deduplicated, so Drain sees each distinct masked message once rather than every raw line.
 
 ### Keeping message text out of memory
 
