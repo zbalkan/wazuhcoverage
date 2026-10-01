@@ -82,6 +82,8 @@ def test_html_report_embeds_template_css_js_and_uses_pinned_cdns() -> None:
     assert '"Segoe UI", "DejaVu Sans", "Arial", "Liberation Sans", sans-serif' in rendered
     assert 'data-tab="dashboard"' in rendered
     assert 'data-tab="findings"' in rendered
+    assert "Coverage flow" in rendered
+    assert 'type: "sankey"' in rendered
     assert "Effective outcomes" in rendered
     assert "Metrics by log type" in rendered
     assert "No decoder" in rendered
@@ -165,3 +167,40 @@ def test_replay_description_and_contribution_data_are_rendered() -> None:
     }
     assert "Contribution" in rendered
     assert 'renderMode: "richText"' in rendered
+
+def test_sankey_keeps_not_verified_outside_decoder_and_rule_stages() -> None:
+    rendered = render_html_report(_analysis())
+    data = _report_data(rendered)
+    links = {
+        (link["source"], link["target"]): link["value"]
+        for link in data["sankey"]["links"]
+    }
+
+    assert links[("Collected events", "Resolved outcome")] == 8
+    assert links[("Collected events", "Not verified")] == 2
+    assert links[("Resolved outcome", "Decoded")] == 8
+    assert links[("Decoded", "Rule matched")] == 8
+    assert ("Not verified", "Decoded") not in links
+    assert ("Not verified", "Rule matched") not in links
+
+
+def test_sankey_replay_resolution_conserves_event_counts() -> None:
+    rendered = render_html_report(_analysis(), (_verification(),))
+    data = _report_data(rendered)
+    links = {
+        (link["source"], link["target"]): link["value"]
+        for link in data["sankey"]["links"]
+    }
+
+    assert links[("Collected events", "Resolved outcome")] == 10
+    assert links[("Resolved outcome", "Decoded")] == 10
+    assert links[("Decoded", "No rule")] == 2
+    assert links[("Decoded", "Rule matched")] == 8
+    assert links[("Rule matched", "Rule matched, no alert")] == 2
+    assert links[("Rule matched", "Rule matched, alerted")] == 6
+    assert sum(
+        value
+        for (source, _target), value in links.items()
+        if source == "Collected events"
+    ) == _analysis().total_events
+

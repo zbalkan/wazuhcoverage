@@ -48,7 +48,7 @@ cat logs.json | wazuhcoverage
 ssh manager "cat /var/ossec/logs/archives/2026/Sep/ossec-archive-18.json.gz" | wazuhcoverage
 ```
 
-For machine-readable metrics, use `wazuhcoverage --json archive.json.gz`. Multiple archives are emitted as JSON Lines. For an interactive two-tab report, use `wazuhcoverage --html report.html archive.json.gz`. The generated file contains the report HTML, CSS and application JavaScript; pinned Pico CSS and ECharts resources are loaded from jsDelivr. Run `wazuhcoverage --help` for the short CLI summary. Target resolution, stdin behaviour, strict parsing, exit codes, output streams, and replay options are documented in [docs/CLI.md](docs/CLI.md).
+For machine-readable metrics, use `wazuhcoverage --json archive.json.gz`. Multiple archives are emitted as JSON Lines. For an interactive two-tab report, use `wazuhcoverage --html report.html archive.json.gz`. The dashboard uses a Sankey diagram as its primary visualization of event flow through resolved, decoded, rule-matched, and alert-threshold outcomes; unresolved events branch to `Not verified` before those inferred stages. The generated file contains the report HTML, CSS and application JavaScript; pinned Pico CSS and ECharts resources are loaded from jsDelivr. Run `wazuhcoverage --help` for the short CLI summary. Target resolution, stdin behaviour, strict parsing, exit codes, output streams, and replay options are documented in [docs/CLI.md](docs/CLI.md).
 
 ## Coverage model
 

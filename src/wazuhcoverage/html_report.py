@@ -13,6 +13,7 @@ from wazuhcoverage.metrics import MetricSnapshot, MetricValue, calculate_metrics
 from wazuhcoverage.models import ArchiveAnalysis, Finding, Verification
 from wazuhcoverage.presentation import (
     FINDING_GROUPS,
+    RESOLVED_OUTCOMES,
     finding_group,
     outcome_counts,
     present_finding,
@@ -279,6 +280,19 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
                 __METRIC_CARDS__
             </div>
 
+            <article>
+                <header>Coverage flow</header>
+                <p>
+                    <small>
+                        Link width represents event count. Not-verified events branch before
+                        decoder and rule stages so the diagram does not infer an outcome that
+                        replay did not establish.
+                    </small>
+                </p>
+                <div id="sankey-chart" class="chart chart-large"></div>
+                <p class="chart-fallback">Chart unavailable. Use the outcome table below.</p>
+            </article>
+
             <div class="grid">
                 <article>
                     <header>Effective outcomes</header>
@@ -401,6 +415,50 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
                 charts.push(chart);
             };
 
+            if (data.sankey.links.length) {
+                createChart("sankey-chart", {
+                    tooltip: {
+                        trigger: "item",
+                        renderMode: "richText",
+                        formatter: (params) => {
+                            if (params.dataType === "edge") {
+                                return [
+                                    params.data.source + " → " + params.data.target,
+                                    Number(params.data.value).toLocaleString() + " events"
+                                ].join("\n");
+                            }
+                            return [
+                                params.name,
+                                Number(params.value || 0).toLocaleString() + " events"
+                            ].join("\n");
+                        }
+                    },
+                    series: [{
+                        type: "sankey",
+                        data: data.sankey.nodes,
+                        links: data.sankey.links,
+                        nodeAlign: "justify",
+                        nodeGap: 18,
+                        nodeWidth: 18,
+                        draggable: false,
+                        emphasis: { focus: "adjacency" },
+                        lineStyle: {
+                            color: "gradient",
+                            curveness: 0.45,
+                            opacity: 0.45
+                        },
+                        label: {
+                            formatter: (params) => [
+                                params.name,
+                                Number(params.value || 0).toLocaleString()
+                            ].join("\n")
+                        }
+                    }]
+                });
+            } else {
+                showFallback("sankey-chart");
+            }
+
             if (data.outcomes.some((row) => row.value > 0)) {
                 createChart("outcome-chart", {
                     tooltip: { trigger: "item", renderMode: "richText" },
@@ -500,6 +558,7 @@ def render_html_report(
     statuses, log_types = resolve_effective_counts(analysis, verifications)
     outcomes = outcome_counts(statuses)
     chart_data = {
+        "sankey": _sankey_data(outcomes),
         "outcomes": [{"name": name, "value": count} for name, count in outcomes.items()],
         "outcome_names": list(outcomes),
         "contributors": {
@@ -531,6 +590,69 @@ def render_html_report(
         _HTML_TEMPLATE,
     )
 
+
+def _sankey_data(
+    outcomes: Dict[str, int],  # noqa: UP006
+) -> Dict[str, List[Dict[str, Any]]]:  # noqa: UP006
+    """Build presentation-only processing stages from resolved outcome counts.
+
+    Not verified branches directly from the archive total. This keeps the
+    diagram from implying that unresolved events were decoded or rule-matched.
+    Synthetic nodes are derived only for visualization and never become model
+    statuses.
+    """
+
+    alerted, no_alert, no_rule, no_decoder, not_verified = RESOLVED_OUTCOMES
+
+    alerted_count = outcomes.get(alerted, 0)
+    no_alert_count = outcomes.get(no_alert, 0)
+    no_rule_count = outcomes.get(no_rule, 0)
+    no_decoder_count = outcomes.get(no_decoder, 0)
+    not_verified_count = outcomes.get(not_verified, 0)
+
+    rule_matched_count = alerted_count + no_alert_count
+    decoded_count = rule_matched_count + no_rule_count
+    resolved_count = decoded_count + no_decoder_count
+    total = resolved_count + not_verified_count
+
+    node_values = {
+        "Collected events": total,
+        "Resolved outcome": resolved_count,
+        not_verified: not_verified_count,
+        no_decoder: no_decoder_count,
+        "Decoded": decoded_count,
+        no_rule: no_rule_count,
+        "Rule matched": rule_matched_count,
+        no_alert: no_alert_count,
+        alerted: alerted_count,
+    }
+    raw_links = (
+        ("Collected events", "Resolved outcome", resolved_count),
+        ("Collected events", not_verified, not_verified_count),
+        ("Resolved outcome", no_decoder, no_decoder_count),
+        ("Resolved outcome", "Decoded", decoded_count),
+        ("Decoded", no_rule, no_rule_count),
+        ("Decoded", "Rule matched", rule_matched_count),
+        ("Rule matched", no_alert, no_alert_count),
+        ("Rule matched", alerted, alerted_count),
+    )
+    links = [
+        {"source": source, "target": target, "value": value}
+        for source, target, value in raw_links
+        if value > 0
+    ]
+
+    active = {"Collected events"}
+    for link in links:
+        active.add(link["source"])
+        active.add(link["target"])
+
+    nodes = [
+        {"name": name, "value": value}
+        for name, value in node_values.items()
+        if name in active
+    ]
+    return {"nodes": nodes, "links": links}
 
 def _render_metric_cards(snapshot: MetricSnapshot) -> str:
     metrics = (
