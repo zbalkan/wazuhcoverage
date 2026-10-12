@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, Literal, Tuple  # noqa: UP035
+from typing import Dict, Literal, Optional, Tuple  # noqa: UP035
 
+from wazuhcoverage import eventchannel
 from wazuhcoverage.models import Finding, Verification
 
 ResolvedOutcome = Literal[
@@ -54,6 +55,12 @@ STATUS_LABELS: Dict[str, str] = {  # noqa: UP006
     "suppressed": "level 0",
     "below_threshold": "below threshold",
 }
+
+# Replay verdicts that name the rule a sample reaches today. A new rule placed
+# anywhere else can be shadowed by that rule: Wazuh descends into the first
+# matching child, so a level-0 sibling such as 61100 wins over a new rule that
+# hangs off the same channel group rule.
+_MATCHED_STATES = frozenset({"suppressed", "below_threshold"})
 
 _EFFECTIVE_OUTCOME: Dict[str, ResolvedOutcome] = {  # noqa: UP006
     status: outcome for outcome, statuses in OUTCOME_STATUSES.items() for status in statuses
@@ -129,3 +136,32 @@ def present_finding(
         rule_description=verification.rule_description,
         replay_error=verification.error,
     )
+
+
+def suggest_for_finding(
+    finding: Finding,
+    verification: Verification | None = None,
+) -> Optional[Tuple[str, str]]:  # noqa: UP006, UP045
+    """Return a heading and a rule skeleton for an unresolved EventChannel finding.
+
+    Wazuh's Windows rules match decoded fields rather than the JSON text, so the
+    skeleton is keyed on those fields. It descends from the rule a replay
+    matched, since a sibling of it would never be evaluated, and is offered only
+    when there is one. Any other finding gets None: a finding from any other
+    decoder, a resolved finding, one a replay showed already alerts, and one
+    with no key to offer (for example a record whose XML the manager could not
+    parse).
+    """
+
+    if finding.observed_decoder != eventchannel.DECODER_NAME:
+        return None
+    # A finding with this decoder was decoded, so no_decoder cannot occur here.
+    if finding.observed_status != "no_alerting_rule":
+        return None
+    # Only a replayed match names a parent that cannot shadow the new rule.
+    # Without one the finding is unverified, or no Windows rule matched at
+    # all, which rules out every child of rule 60000 too.
+    if verification is None or verification.effective_state not in _MATCHED_STATES or not verification.rule_id:
+        return None
+    rule = eventchannel.suggest_rule(finding.sample_log, parent=verification.rule_id)
+    return None if rule is None else ("Suggested Wazuh rule (eventchannel)", rule)

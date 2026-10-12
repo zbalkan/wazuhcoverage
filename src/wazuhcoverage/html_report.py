@@ -9,7 +9,6 @@ from datetime import datetime
 from html import escape
 from typing import Any, Dict, List, Tuple, TypedDict  # noqa: UP035
 
-from wazuhcoverage.eventchannel import suggest_for_finding
 from wazuhcoverage.metrics import MetricSnapshot, MetricValue, calculate_metrics, resolve_effective_counts
 from wazuhcoverage.models import ArchiveAnalysis, Finding, Verification
 from wazuhcoverage.presentation import (
@@ -17,6 +16,7 @@ from wazuhcoverage.presentation import (
     finding_group,
     outcome_counts,
     present_finding,
+    suggest_for_finding,
 )
 
 _HTML_TEMPLATE = r"""<!DOCTYPE html>
