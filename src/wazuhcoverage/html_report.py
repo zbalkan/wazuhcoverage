@@ -9,6 +9,7 @@ from datetime import datetime
 from html import escape
 from typing import Any, Dict, List, Tuple, TypedDict  # noqa: UP035
 
+from wazuhcoverage.eventchannel import suggest_for_finding
 from wazuhcoverage.metrics import MetricSnapshot, MetricValue, calculate_metrics, resolve_effective_counts
 from wazuhcoverage.models import ArchiveAnalysis, Finding, Verification
 from wazuhcoverage.presentation import (
@@ -17,7 +18,6 @@ from wazuhcoverage.presentation import (
     outcome_counts,
     present_finding,
 )
-from wazuhcoverage.wazuh_regex import suggest_for_finding
 
 _HTML_TEMPLATE = r"""<!DOCTYPE html>
 <html lang="en" data-theme="light">
@@ -688,11 +688,11 @@ def _render_finding(finding: Finding, verification: Verification | None) -> str:
         )
     )
 
-    regex_suggestion = ""
+    rule_suggestion = ""
     suggestion = suggest_for_finding(finding, verification)
     if suggestion is not None:
         heading, text = suggestion
-        regex_suggestion = f"<h4>{escape(heading)}</h4><pre><code>{escape(text)}</code></pre>"
+        rule_suggestion = f"<h4>{escape(heading)}</h4><pre><code>{escape(text)}</code></pre>"
 
     return (
         '<details class="finding">'
@@ -700,7 +700,7 @@ def _render_finding(finding: Finding, verification: Verification | None) -> str:
         f"<figure><table><tbody>{rows}</tbody></table></figure>"
         "<h4>Pattern</h4>"
         f"<pre><code>{escape(finding.message_pattern)}</code></pre>"
-        f"{regex_suggestion}"
+        f"{rule_suggestion}"
         "<h4>Sample</h4>"
         f"<pre><code>{escape(finding.sample_log)}</code></pre>"
         "</details>"

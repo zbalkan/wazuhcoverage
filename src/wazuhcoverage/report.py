@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Dict, List, Tuple  # noqa: UP035
 
+from wazuhcoverage.eventchannel import suggest_for_finding
 from wazuhcoverage.metrics import MetricSnapshot, MetricValue, calculate_metrics, resolve_effective_counts
 from wazuhcoverage.models import (
     EFFECTIVE_STATES,
@@ -23,7 +24,6 @@ from wazuhcoverage.presentation import (
     outcome_counts,
     present_finding,
 )
-from wazuhcoverage.wazuh_regex import suggest_for_finding
 
 _OUTCOME_WIDTH = max(24, max(len(outcome) for outcome in RESOLVED_OUTCOMES) + 2)
 _LOG_TYPE_WIDTH = 32

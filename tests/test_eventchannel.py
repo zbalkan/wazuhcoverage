@@ -200,3 +200,20 @@ def test_no_suggestion_when_replay_shows_the_finding_already_alerts() -> None:
 
     assert not any("Suggested" in row for row in _finding_rows(1, finding, alerting))
     assert "Suggested" not in _render_finding(finding, alerting)
+
+
+def test_no_suggestion_for_findings_from_other_decoders() -> None:
+    # A regex over the archived full_log is not something a decoder can use:
+    # the predecoder strips the syslog header before any decoder or rule regex
+    # runs, so a suggestion anchored on that header could never match.
+    finding = replace(
+        _eventchannel_finding(_win_log("4624", 1)),
+        observed_decoder="sshd",
+        message_pattern="<TIMESTAMP> host <*> Failed password for <*> from <*> port <*> ssh2",
+        sample_log="Oct 12 10:00:00 host sshd[123]: Failed password for root from 10.0.0.1 port 22 ssh2",
+    )
+    matched = _verification("suppressed", "5700")
+
+    for verification in (None, matched):
+        assert not any("Suggested" in row for row in _finding_rows(1, finding, verification))
+        assert "Suggested" not in _render_finding(finding, verification)

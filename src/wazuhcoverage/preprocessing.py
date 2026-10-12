@@ -8,8 +8,7 @@ if TYPE_CHECKING:
     from duckdb import DuckDBPyConnection
 
 
-# These expressions deliberately stay inside the regex subset shared by
-# DuckDB/RE2 and Wazuh PCRE2. They recognize syntax, not calendar validity.
+# These expressions recognize syntax, not calendar validity.
 #
 # Order matters where one syntax is a prefix of another. Timezone-bearing ISO
 # forms must be tried before the otherwise identical no-timezone form. The
@@ -76,7 +75,6 @@ TIMESTAMP_PATTERNS = (
 
 _TIMESTAMP_ALTERNATION = "|".join(pattern for _, pattern in TIMESTAMP_PATTERNS)
 TIMESTAMP_PREFIX_RE2 = f"^({_TIMESTAMP_ALTERNATION})"
-WAZUH_TIMESTAMP_PCRE2 = f"(?:{_TIMESTAMP_ALTERNATION})"
 
 _UUID_RE2 = r"[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}"
 _HEX_RE2 = r"\b(0x)?[0-9A-Fa-f]{16,}\b"
