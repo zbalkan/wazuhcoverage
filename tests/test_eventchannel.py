@@ -208,14 +208,24 @@ def test_no_suggestion_for_findings_from_other_decoders() -> None:
     # A regex over the archived full_log is not something a decoder can use:
     # the predecoder strips the syslog header before any decoder or rule regex
     # runs, so a suggestion anchored on that header could never match.
-    finding = replace(
+    decoded = replace(
         _eventchannel_finding(_win_log("4624", 1)),
+        log_type="sshd",
         observed_decoder="sshd",
         message_pattern="<TIMESTAMP> host <*> Failed password for <*> from <*> port <*> ssh2",
         sample_log="Oct 12 10:00:00 host sshd[123]: Failed password for root from 10.0.0.1 port 22 ssh2",
     )
+    undecoded = replace(
+        decoded,
+        observed_status="no_decoder",
+        log_type="myapp",
+        observed_decoder=None,
+        message_pattern="<TIMESTAMP> host <*> job <*> finished id=<NUM>",
+        sample_log="Oct 12 10:00:00 host myapp[123]: job alice finished id=123456",
+    )
     matched = _verification("suppressed", "5700")
 
-    for verification in (None, matched):
-        assert not any("Suggested" in row for row in _finding_rows(1, finding, verification))
-        assert "Suggested" not in _render_finding(finding, verification)
+    for finding in (decoded, undecoded):
+        for verification in (None, matched):
+            assert not any("Suggested" in row for row in _finding_rows(1, finding, verification))
+            assert "Suggested" not in _render_finding(finding, verification)
