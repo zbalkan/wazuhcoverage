@@ -93,7 +93,8 @@ def suggest_for_finding(
 
     if finding.observed_decoder != DECODER_NAME:
         return None
-    if finding.observed_status not in ("no_decoder", "no_alerting_rule"):
+    # A finding with this decoder was decoded, so no_decoder cannot occur here.
+    if finding.observed_status != "no_alerting_rule":
         return None
     # Only a replayed match names a parent that cannot shadow the new rule.
     # Without one the finding is unverified, or no Windows rule matched at
