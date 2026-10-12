@@ -170,8 +170,10 @@ def test_reports_suggest_a_rule_not_a_regex_for_eventchannel_findings() -> None:
     rows = _finding_rows(1, finding, matched)
     rendered = _render_finding(finding, matched)
 
-    assert any(row.startswith("    Suggested Wazuh rule (eventchannel): <rule ") for row in rows)
-    assert not any("Suggested Wazuh regex" in row for row in rows)
+    suggestions = [row for row in rows if "Suggested" in row]
+    assert len(suggestions) == 1
+    assert suggestions[0].startswith("    Suggested Wazuh rule (eventchannel): <rule ")
+    assert rendered.count("Suggested") == 1
     assert "<h4>Suggested Wazuh rule (eventchannel)</h4>" in rendered
     assert "&lt;if_sid&gt;60106&lt;/if_sid&gt;" in rendered
 
